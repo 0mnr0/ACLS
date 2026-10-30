@@ -1,14 +1,12 @@
 #include "game/pointers/Pointers.hpp"
 #include "game/frontend/Menu.hpp"
 #include "core/frontend/manager/UIManager.hpp"
-#include "game/frontend/submenus/Settings/GUISettings.hpp"
 
 namespace YimMenu
 {
 	void RenderClassicTheme()
 	{
-		YimMenu::SyncColorCommandsToStyle();
-
+		
 		float windowWidth = *YimMenu::Pointers.ScreenResX / 2.5f;
 		float centerX = (*YimMenu::Pointers.ScreenResX - windowWidth) / 2.0f;
 		float centerY = *YimMenu::Pointers.ScreenResY / 5.0f;
@@ -37,7 +35,7 @@ namespace YimMenu
 			}
 			ImGui::EndChild();
 
-			ImGui::Text("YimMenuV2");
+			ImGui::Text("SafeYimV2");
 
 			pos.y -= 28;
 			ImGui::SetCursorPos(ImVec2(pos.x + 130, pos.y));

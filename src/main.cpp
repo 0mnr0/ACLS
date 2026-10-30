@@ -12,20 +12,12 @@
 #include "core/renderer/D3D12Hook.hpp"
 #include "core/renderer/Renderer.hpp"
 #include "core/util/Wine.hpp"
-#include "core/scripting/LuaManager.hpp"
 #include "game/backend/AnticheatBypass.hpp"
-#include "game/backend/Players.hpp"
-#include "game/backend/SavedLocations.hpp"
-#include "game/backend/SavedPlayers.hpp"
 #include "game/backend/Self.hpp"
 #include "game/backend/NativeHooks.hpp"
-#include "game/backend/Tunables.hpp"
 #include "game/backend/ScriptPointers.hpp"
 #include "game/frontend/GUI.hpp"
 #include "game/pointers/Pointers.hpp"
-#include "game/features/vehicle/SavePersonalVehicle.hpp"
-#include "game/features/self/OpenGunLocker.hpp"
-#include "game/features/recovery/DailyActivities.hpp"
 
 namespace YimMenu
 {
@@ -36,11 +28,10 @@ namespace YimMenu
 
 		LogHelper::Init("YimMenuV2", FileMgr::GetProjectFile("./cout.log"));
 
-		LOGF(INFO, "Welcome to YimMenuV2! Build date: {} at {}", __DATE__, __TIME__);
+		LOGF(INFO, "Welcome to SafeYimV2! Build date: {} at {}", __DATE__, __TIME__);
 
 		g_HotkeySystem.RegisterCommands();
-		SavedLocations::FetchSavedLocations();
-		Settings::Initialize(FileMgr::GetProjectFile("./settings.json"));
+		Settings::Initialize(FileMgr::GetProjectFile("./safe_settings.json"));
 
 		if (!ModuleMgr.LoadModules())
 			goto EARLY_UNLOAD;
@@ -68,23 +59,16 @@ namespace YimMenu
 		GUI::Init();
 
 		ScriptMgr::AddScript(std::make_unique<Script>(&NativeHooks::RunScript)); // runs once
-		ScriptMgr::AddScript(std::make_unique<Script>(&Tunables::RunScript));    // runs once
 		ScriptMgr::AddScript(std::make_unique<Script>(&AnticheatBypass::RunScript));
 		ScriptMgr::AddScript(std::make_unique<Script>(&Self::RunScript));
 		ScriptMgr::AddScript(std::make_unique<Script>(&GUI::RunScript));
 		FiberPool::Init(16);
-		ScriptMgr::AddScript(std::make_unique<Script>(&LuaManager::RunScript));
-		ScriptMgr::AddScript(std::make_unique<Script>(&HotkeySystem::RunScript));
 		ScriptMgr::AddScript(std::make_unique<Script>(&Commands::RunScript));
-		ScriptMgr::AddScript(std::make_unique<Script>(&Features::SavePersonalVehicle::RunScript));
-		ScriptMgr::AddScript(std::make_unique<Script>(&Features::OpenGunLocker::RunScript));
-		ScriptMgr::AddScript(std::make_unique<Script>(&Features::OpenStreetDealerMenu::RunScript));
-		ScriptMgr::AddScript(std::make_unique<Script>(&SavedPlayers::RunScript));
 
 		if (!Pointers.LateInit())
 			LOG(WARNING) << "Socialclub patterns failed to load";
 
-		Notifications::Show("YimMenuV2", "Loaded succesfully", NotificationType::Success);
+		Notifications::Show("SafeYimV2", "Loaded succesfully", NotificationType::Success);
 
 		if (InWine().value_or(false))
 		    LOG(INFO) << "Running in Wine!";

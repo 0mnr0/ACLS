@@ -1,7 +1,6 @@
 #include "Ped.hpp"
 
 #include "Natives.hpp"
-#include "game/backend/Outfit.hpp"
 #include "core/backend/ScriptMgr.hpp"
 #include "game/pointers/Pointers.hpp"
 #include <random>
@@ -33,9 +32,7 @@ namespace YimMenu
 			}
 		}
 
-		Pointers.SpectatePatch->Apply();
 		auto ped = Ped(PED::CREATE_PED(0, model, coords.x, coords.y, coords.z, heading, true, 0));
-		Pointers.SpectatePatch->Restore();
 
 		if (!ped)
 		{
@@ -268,42 +265,6 @@ namespace YimMenu
 		PED::SET_PED_RANDOM_COMPONENT_VARIATION(GetHandle(), 0);
 	}
 
-	void Ped::RandomizeOutfit2()
-	{
-		ENTITY_ASSERT_VALID();
-		ENTITY_ASSERT_CONTROL();
-
-		Outfit::OutfitComponents components{};
-		Outfit::OutfitProps props{};
-		auto ped = GetHandle();
-		std::random_device rd;
-		std::mt19937 gen(rd());
-
-		// Randomize components
-		for (auto& item : components.items)
-		{
-			int drawable_id_max = PED::GET_NUMBER_OF_PED_DRAWABLE_VARIATIONS(ped, item.first) - 1;
-			if (drawable_id_max <= 0) // 0 if one variation, -1 if no variation
-				continue;
-
-			int drawable_id = std::uniform_int_distribution<>(0, drawable_id_max)(gen); // i in [a, b]
-			int texture_id_max = PED::GET_NUMBER_OF_PED_TEXTURE_VARIATIONS(ped, item.first, drawable_id) - 1;
-			int texture_id = texture_id_max > 0 ? std::uniform_int_distribution<>(0, texture_id_max)(gen) : 0;
-			PED::SET_PED_COMPONENT_VARIATION(ped, item.first, drawable_id, texture_id, PED::GET_PED_PALETTE_VARIATION(ped, item.first));
-		}
-		// Randomize props
-		for (auto& item : props.items)
-		{
-			int drawable_id_max = PED::GET_NUMBER_OF_PED_PROP_DRAWABLE_VARIATIONS(ped, item.first) - 1;
-			if (drawable_id_max <= 0) // 0 if one variation, -1 if no variation
-				continue;
-
-			int drawable_id = std::uniform_int_distribution<>(0, drawable_id_max)(gen); // i in [a, b]
-			int texture_id_max = PED::GET_NUMBER_OF_PED_PROP_TEXTURE_VARIATIONS(ped, item.first, drawable_id) - 1;
-			int texture_id = texture_id_max > 0 ? std::uniform_int_distribution<>(0, texture_id_max)(gen) : 0;
-			PED::SET_PED_PROP_INDEX(ped, item.first, drawable_id, texture_id, TRUE, 0);
-		}
-	}
 
 	void Ped::StartScenario(std::string_view name, int duration, bool entry_anim)
 	{

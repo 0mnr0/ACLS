@@ -3,9 +3,9 @@
 
 namespace YimMenu::Submenus
 {
-	class Network : public Submenu
+	class Other : public Submenu
 	{
 	public:
-		Network();
+		Other();
 	};
 }

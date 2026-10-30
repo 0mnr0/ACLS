@@ -1,14 +1,9 @@
 #include "core/frontend/manager/UIManager.hpp"
 #include "GUI.hpp"
 #include "Menu.hpp"
-#include "ESP.hpp"
-#include "Overlay.hpp"
 #include "core/backend/ScriptMgr.hpp"
 #include "core/renderer/Renderer.hpp"
-#include "core/scripting/LuaManager.hpp"
-#include "core/scripting/LuaScript.hpp"
 #include "core/frontend/Notifications.hpp"
-#include "game/frontend/ChatDisplay.hpp"
 #include "game/gta/Natives.hpp"
 #include "types/pad/ControllerInputs.hpp"
 
@@ -22,54 +17,11 @@ namespace YimMenu
 			GUI::WndProc(hwnd, msg, wparam, lparam);
 		});
 
-		Renderer::AddWindowProcedureCallback([this](HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
-			LuaManager::DispatchEvent(MenuEvent::WndProc, [hwnd, msg, wparam, lparam](lua_State* state)
-			{
-				lua_pushinteger(state, reinterpret_cast<uintptr_t>(hwnd));
-				lua_pushinteger(state, msg);
-				lua_pushinteger(state, wparam);
-				lua_pushinteger(state, lparam);
-
-				return 4;
-			});
-		});
-
 		Renderer::AddRendererCallback(
 		    [&] {
 			    Notifications::Draw();
 		    },
 		    -2);
-		Renderer::AddRendererCallback(
-		    [&] {
-			    ESP::Draw();
-		    },
-		    -3);
-		Renderer::AddRendererCallback(
-		    [&] {
-			    ChatDisplay::Draw();
-		    },
-		    -5);
-		Renderer::AddRendererCallback(
-		    [&] {
-			    Overlay::Draw();
-		    },
-		    -6);
-		Renderer::AddRendererCallback(
-		    [] {
-			    LuaManager::ForAllLoadedScripts([](std::shared_ptr<LuaScript>& script) {
-				    script->GetUserInterface().DrawAlwaysDrawImGuiCallbacks();
-			    });
-		    },
-		    -7);
-		Renderer::AddRendererCallback(
-		    [] {
-			    if (!GUI::IsOpen())
-				    return;
-			    LuaManager::ForAllLoadedScripts([](std::shared_ptr<LuaScript>& script) {
-				    script->GetUserInterface().DrawImGuiCallbacks();
-			    });
-		    },
-		    -4);
 		
 		Renderer::SetSafeToRender();
 	}

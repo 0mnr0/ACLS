@@ -3,7 +3,6 @@
 #include "game/pointers/Pointers.hpp"
 #include "types/network/CNetworkPlayerMgr.hpp"
 
-
 namespace YimMenu
 {
 	Packet::Packet() :
@@ -17,6 +16,9 @@ namespace YimMenu
 		if (reliable)
 			flags |= 1;
 
-		Pointers.QueuePacket((*Pointers.NetworkPlayerMgr)->m_NetConnectionMgr, msg_id, m_Data, (m_Buffer.m_CurBit + 7) >> 3, flags, nullptr);
+		if (Pointers.QueuePacket && Pointers.NetworkPlayerMgr && *Pointers.NetworkPlayerMgr && (*Pointers.NetworkPlayerMgr)->m_NetConnectionMgr)
+		{
+			Pointers.QueuePacket((*Pointers.NetworkPlayerMgr)->m_NetConnectionMgr, msg_id, m_Data, (m_Buffer.m_CurBit + 7) >> 3, flags, nullptr);
+		}
 	}
 }

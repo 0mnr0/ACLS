@@ -7,12 +7,9 @@
 #include "types/rage/tlsContext.hpp"
 #include "types/entity/CDynamicEntity.hpp"
 #include "types/network/netObject.hpp"
-#include "types/network/CNetworkPlayerMgr.hpp"
 #include "game/gta/Scripts.hpp"
 #include "types/ped/CPedFactory.hpp"
-#include "types/network/netObjectMgrBase.hpp"
 #include "game/backend/Self.hpp"
-#include "game/gta/Packet.hpp"
 
 namespace
 {
@@ -226,49 +223,6 @@ namespace YimMenu
 
 	void Entity::DeleteNetwork(std::uint16_t network_id, std::uint32_t ownership_token, bool local, Player* for_player)
 	{
-		char buf[0x200]{};
-		rage::datBitBuffer remove_buf(buf, sizeof(buf));
-		int msgs_written = 0;
-
-		if (ownership_token == -1)
-		{
-			remove_buf.Write<std::uint16_t>(network_id, 13);
-			remove_buf.Write<int>(GetNextTokenValue(ownership_token), 5);
-			msgs_written++;
-		}
-		else
-		{
-			// try all tokens if we don't know it
-			for (int i = 0; i < 0x1F; i++)
-			{
-				remove_buf.Write<std::uint16_t>(network_id, 13);
-				remove_buf.Write<int>(i, 5);
-				msgs_written++;
-			}
-		}
-
-		Packet pack;
-		pack.WriteMessageHeader(rage::netMessage::Type::PackedReliables);
-		pack.GetBuffer().Write<int>(4, 4); // remove
-		pack.GetBuffer().Write(msgs_written, 5);
-		pack.GetBuffer().Write(remove_buf.m_BitsRead, 13);
-		pack.GetBuffer().WriteArray(buf, remove_buf.m_BitsRead);
-
-		if (for_player)
-		{
-			if (for_player->IsValid())
-				pack.Send(for_player->GetMessageId());
-		}
-		else
-		{
-			for (int i = 0; i < 32; i++)
-				if (auto player = (*Pointers.NetworkPlayerMgr)->m_Players[i]; player && player->IsPhysical() && !player->IsLocal())
-					pack.Send(player->m_MessageId);
-		}
-
-		if (local)
-			if (auto object = Pointers.GetNetObjectById(network_id))
-				(*Pointers.NetworkObjectMgr)->UnregisterNetworkObject(object, 8, true, true);
 	}
 
 	void Entity::DeleteNetwork(rage::netObject* object, bool local, Player* for_player)
@@ -335,59 +289,19 @@ namespace YimMenu
 
 	void Entity::ForceControl()
 	{
-		ENTITY_ASSERT_VALID();
-
-		if (!IsNetworked() || HasControl())
-			return;
-
-		(*Pointers.NetworkObjectMgr)->ChangeOwner(GetNetworkObject(), Self::GetPlayer().GetHandle(), 0);
 	}
 
 	bool Entity::RequestControl(int timeout)
 	{
 		ENTITY_ASSERT_VALID();
 		ENTITY_ASSERT_SCRIPT_CONTEXT();
-
-		if (!IsNetworked() || HasControl())
-			return true;
-
-		for (int i = 0; i < (timeout + 1); i++)
-		{
-			if (!IsValid() || !*Pointers.IsSessionStarted)
-				return false;
-
-			if (HasControl())
-				return true;
-
-			Pointers.RequestControl(GetNetworkObject());
-			if (timeout)
-				ScriptMgr::Yield();
-		}
-
+		if (!IsNetworked() || HasControl()) return true;
+		NETWORK::NETWORK_REQUEST_CONTROL_OF_ENTITY(GetHandle());
 		return HasControl();
 	}
 
 	void Entity::ForceSync(Player* for_player)
 	{
-		ENTITY_ASSERT_VALID();
-		ENTITY_ASSERT_CONTROL();
-		ENTITY_ASSERT_SCRIPT_CONTEXT();
-
-		if (!IsNetworked())
-			return;
-
-		char data[0x400];
-		auto net = GetNetworkObject();
-		for (int i = 0; i < 32; i++)
-		{
-			if ((*Pointers.NetworkPlayerMgr)->m_Players[i]
-			    && (*Pointers.NetworkPlayerMgr)->m_Players[i] != (*Pointers.NetworkPlayerMgr)->m_LocalPlayer
-			    && (!for_player || !for_player->IsValid() || for_player->GetId() == i))
-			{
-				rage::datBitBuffer buffer(data, sizeof(data));
-				(*Pointers.NetworkObjectMgr)->PackCloneCreate(net, (*Pointers.NetworkPlayerMgr)->m_Players[i], &buffer);
-			}
-		}
 	}
 
 	bool Entity::HasControl()
@@ -418,23 +332,7 @@ namespace YimMenu
 	void Entity::Kill()
 	{
 		ENTITY_ASSERT_VALID();
-
-		if (HasControl())
-		{
-			ENTITY::SET_ENTITY_HEALTH(GetHandle(), 0, PLAYER::PLAYER_PED_ID(), 0);
-		}
-		else
-		{
-			auto ptr = GetPointer<CEntity*>();
-			auto local = reinterpret_cast<CEntity*>((*Pointers.PedFactory)->m_LocalPed);
-			auto pos = GetPosition();
-			std::uint32_t weapon = "WEAPON_EXPLOSION"_J;
-
-			if (!ptr || !local)
-				return;
-
-			Pointers.TriggerWeaponDamageEvent(local, ptr, &pos, 0, true, weapon, 9999.9f, 2, 0, (1 << 4) | 0x80000, 0, 0, 0, false, false, true, true, nullptr);
-		}
+		ENTITY::SET_ENTITY_HEALTH(GetHandle(), 0, PLAYER::PLAYER_PED_ID(), 0);
 	}
 
 	int Entity::GetHealth()

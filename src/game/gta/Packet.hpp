@@ -1,9 +1,7 @@
 #pragma once
-#include "Player.hpp"
 
 #include "types/rage/datBitBuffer.hpp"
 #include "types/network/netMessage.hpp"
-
 
 namespace YimMenu
 {
@@ -14,7 +12,7 @@ namespace YimMenu
 
 	public:
 		Packet();
-		void Send(uint32_t msg_id, bool reliable = true);
+		void Send(uint32_t msg_id, bool reliable = false);
 
 		inline operator rage::datBitBuffer&()
 		{
@@ -41,5 +39,4 @@ namespace YimMenu
 			}
 		}
 	};
-
 }

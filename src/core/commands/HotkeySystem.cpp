@@ -30,8 +30,11 @@ namespace YimMenu
 			m_CommandHotkeys.insert(std::make_pair(hash, link));
 		}
 
-		m_CommandHotkeys.at("chathelper"_J).m_Chain.clear(); // ensure chat is always bound
-		m_CommandHotkeys.at("chathelper"_J).m_Chain.push_back(0x54);
+		if (auto it = m_CommandHotkeys.find("chathelper"_J); it != m_CommandHotkeys.end())
+		{
+			it->second.m_Chain.clear();
+			it->second.m_Chain.push_back(0x54);
+		}
 	}
 
 	bool HotkeySystem::ListenAndApply(int& Hotkey, std::vector<int> Blacklist)

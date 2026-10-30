@@ -2,15 +2,8 @@
 #include "core/frontend/manager/UIManager.hpp"
 #include "core/renderer/Renderer.hpp"
 #include "game/frontend/fonts/Fonts.hpp"
-#include "submenus/Self.hpp"
 #include "submenus/Vehicle.hpp"
-#include "submenus/Teleport.hpp"
-#include "submenus/Network.hpp"
-#include "submenus/Players.hpp"
-#include "submenus/Recovery.hpp"
-#include "submenus/Settings.hpp"
-#include "submenus/Debug.hpp"
-#include "submenus/World.hpp"
+#include "submenus/Other.hpp"
 #include "Onboarding.hpp"
 
 namespace YimMenu
@@ -18,15 +11,8 @@ namespace YimMenu
 	void Menu::Init()
 	{
 		// Arguably the only place this file should be edited at for more menus
-		UIManager::AddSubmenu(std::make_shared<Submenus::Self>());
 		UIManager::AddSubmenu(std::make_shared<Submenus::Vehicle>());
-		UIManager::AddSubmenu(std::make_shared<Submenus::Teleport>());
-		UIManager::AddSubmenu(std::make_shared<Submenus::Network>());
-		UIManager::AddSubmenu(std::make_shared<Submenus::Players>());
-		UIManager::AddSubmenu(std::make_shared<Submenus::World>());
-		UIManager::AddSubmenu(std::make_shared<Submenus::Recovery>());
-		UIManager::AddSubmenu(std::make_shared<Submenus::Settings>());
-		UIManager::AddSubmenu(std::make_shared<Submenus::Debug>());
+		UIManager::AddSubmenu(std::make_shared<Submenus::Other>());
 
 		Renderer::AddRendererCallback(
 		    [&] {
@@ -70,11 +56,13 @@ namespace YimMenu
 		// just use Arial for Cyrillic
 
 		FontCfg.MergeMode = true;
-		io.Fonts->AddFontFromFileTTF((std::filesystem::path(std::getenv("SYSTEMROOT")) / "Fonts" / "arial.ttf").string().c_str(), size, &FontCfg, GetGlyphRangesCyrillicOnly());
-		io.Fonts->AddFontFromFileTTF((std::filesystem::path(std::getenv("SYSTEMROOT")) / "Fonts" / "meiryo.ttc").string().c_str(), size, &FontCfg, io.Fonts->GetGlyphRangesJapanese());
-
-		io.Fonts->Build();
-
+		
+		const auto fonts_dir = std::filesystem::path(std::getenv("SYSTEMROOT")) / "Fonts";
+		if (const auto arial = fonts_dir / "arial.ttf"; std::filesystem::exists(arial))
+			io.Fonts->AddFontFromFileTTF(arial.string().c_str(), size, &FontCfg, GetGlyphRangesCyrillicOnly());
+		if (const auto meiryo = fonts_dir / "meiryo.ttc"; std::filesystem::exists(meiryo))
+			io.Fonts->AddFontFromFileTTF(meiryo.string().c_str(), size, &FontCfg, io.Fonts->GetGlyphRangesJapanese());
+		
 		return font;
 	}
 
@@ -96,6 +84,7 @@ namespace YimMenu
 		Menu::Font::g_OverlayFont = CreateFontWithCyrillicSupport(IO, Menu::Font::g_OverlayFontSize);
 		static const ImWchar full_range[] = {0x0020, 0xFFFF, 0};
 		Menu::Font::g_AwesomeFont = IO.Fonts->AddFontFromMemoryTTF(const_cast<std::uint8_t*>(Fonts::IconFont), sizeof(Fonts::IconFont), Menu::Font::g_AwesomeFontSize, &FontCfg, full_range);
+		IO.Fonts->Build();
 
 		UIManager::SetOptionsFont(Menu::Font::g_OptionsFont);
 		Renderer::SetFontsUpdated();

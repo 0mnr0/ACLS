@@ -48,7 +48,6 @@ namespace YimMenu
 		static void ToggleMouse();
 
 	private:
-		friend class LuaUserInterface;
 
 		static void AcquireMouseOverride()
 		{

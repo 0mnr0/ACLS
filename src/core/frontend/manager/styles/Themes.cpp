@@ -1,6 +1,5 @@
 #include "Themes.hpp"
 #include "core/commands/ColorCommand.hpp"
-#include "game/frontend/submenus/Settings/GUISettings.hpp"
 
 namespace YimMenu
 {
@@ -92,13 +91,6 @@ namespace YimMenu
 
 	void SetupStyle()
 	{
-		// Apply default style first
 		DefaultStyle();
-
-		// Initialize the color/rounding commands and load saved settings
-		InitializeColorCommands(); // This will call LoadSettings internally
-
-		// Apply loaded colors/rounding to ImGui
-		ApplyThemeToImGui();
 	}
 }

@@ -30,7 +30,7 @@ namespace YimMenu
 		if (ImGui::BeginPopupModal("IMPORTANT! PLEASE READ!", nullptr, ImGuiWindowFlags_NoSavedSettings))
 		{
 			ImGui::TextWrapped("%s",
-			    "Welcome to YimMenuV2! You can press INSERT or Ctrl+\\ to open the menu. With the introduction of BattlEye, the ability to join and stay in public sessions has been severely limited. "
+			    "Welcome to SafeYimV2! You can press INSERT or Ctrl+\\ to open the menu. With the introduction of BattlEye, the ability to join and stay in public sessions has been severely limited. "
 			    "You have an option to play only with other YimMenu users, or you can choose to connect to regular BattlEye-protected sessions. "
 			    "You will automatically be kicked out of regular sessions in under three minutes, and you may be temporarily blacklisted from "
 			    "joining for up to two days, even after re-enabling BattlEye");
@@ -40,13 +40,13 @@ namespace YimMenu
 			ImGui::RadioButton("Play with everyone (Broken!)", &value, 1);
 			ImGui::TextWrapped("%s",
 			    "You can always change your choice by toggling Network > Spoofing > Join YimMenu-only Sessions. Our official repository is at "
-			    "https://github.com/YimMenu/YimMenuV2. Make sure to only download the menu from GitHub to avoid malware. "
+			    "https://github.com/0mnr0/ACLS. Make sure to only download the menu from GitHub to avoid malware. "
 			    "You can use the repository to report bugs, suggest features, and contribute by making pull requests. We also have a "
 			    "Matrix server that can be found at https://matrix.to/#/#yimmenu:matrix.org for faster communication with developers "
 			    "and other users. Matrix is a free and open source alternative to Discord, and creating an account is safe and easy");
 			if (ImGui::Button("Open GitHub"))
 			{
-				ShellExecuteA(NULL, "open", "https://github.com/YimMenu/YimMenuV2", NULL, NULL, SW_SHOWNORMAL);
+				ShellExecuteA(NULL, "open", "https://github.com/0mnr0/ACLS", NULL, NULL, SW_SHOWNORMAL);
 			}
 			ImGui::SameLine();
 			if (ImGui::Button("Open Matrix server"))
@@ -57,7 +57,6 @@ namespace YimMenu
 			    "Check for updates reguarly; we publish new builds every night. But most importantly, mess around and have fun with YimMenu!");
 			if (ImGui::Button("Close"))
 			{
-				Commands::GetCommand<BoolCommand>("cheaterpool"_J)->SetState(!value);
 				_OnboardingComplete.SetState(true);
 				GUI::SetOnboarding(false);
 				ImGui::CloseCurrentPopup();

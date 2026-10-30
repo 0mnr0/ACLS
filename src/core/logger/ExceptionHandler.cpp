@@ -2,6 +2,7 @@
 
 #include "StackTrace.hpp"
 
+#include <chrono>
 #include <hde64.h>
 #include <unordered_set>
 
@@ -35,6 +36,31 @@ namespace YimMenu
 		const auto exception_code = exception_info->ExceptionRecord->ExceptionCode;
 		if (exception_code == EXCEPTION_BREAKPOINT || exception_code == DBG_PRINTEXCEPTION_C || exception_code == DBG_PRINTEXCEPTION_WIDE_C)
 			return EXCEPTION_CONTINUE_SEARCH;
+
+		// Prevent infinite exception cascades / FPS thrashing
+		constexpr int MAX_RAPID_EXCEPTIONS = 4;
+		constexpr auto RAPID_WINDOW = std::chrono::milliseconds(250);
+
+		thread_local static auto s_LastExceptionTime = std::chrono::steady_clock::now();
+		thread_local static int s_RapidExceptionCount = 0;
+
+		const auto now = std::chrono::steady_clock::now();
+		if (now - s_LastExceptionTime < RAPID_WINDOW)
+		{
+			s_RapidExceptionCount++;
+			if (s_RapidExceptionCount >= MAX_RAPID_EXCEPTIONS)
+			{
+				LOG(FATAL) << "Exception storm detected (" << s_RapidExceptionCount 
+				           << " rapid exceptions). Halting recovery to prevent freeze/FPS drop.";
+				Logger::FlushQueue();
+				return EXCEPTION_CONTINUE_SEARCH;
+			}
+		}
+		else
+		{
+			s_RapidExceptionCount = 0;
+		}
+		s_LastExceptionTime = now;
 
 		static std::unordered_set<std::size_t> logged_exceptions;
 
@@ -87,33 +113,40 @@ namespace YimMenu
 					exception_info->ContextRecord->Rsp += 8;
 				}
 			}
-			else
+			else if ((opcode.opcode == 0x8B || opcode.opcode == 0x8A) && opcode.modrm_mod != 3)
 			{
+				uint8_t regIdx = opcode.rex_r << 3 | opcode.modrm_reg;
+				if (regIdx == 4) // RSP
+				{
+					LOG(FATAL) << "Cannot zero RSP register, aborting recovery";
+					return EXCEPTION_CONTINUE_SEARCH;
+				}
+
 				exception_info->ContextRecord->Rip += opcode.len;
 
-				if (opcode.opcode == 0x8B && opcode.modrm_mod != 3)
+				switch (regIdx)
 				{
-					uint8_t regIdx = opcode.rex_r << 3 | opcode.modrm_reg;
-					switch (regIdx)
-					{
-					case 0: exception_info->ContextRecord->Rax = 0; break;
-					case 1: exception_info->ContextRecord->Rcx = 0; break;
-					case 2: exception_info->ContextRecord->Rdx = 0; break;
-					case 3: exception_info->ContextRecord->Rbx = 0; break;
-					case 4: exception_info->ContextRecord->Rsp = 0; break;
-					case 5: exception_info->ContextRecord->Rbp = 0; break;
-					case 6: exception_info->ContextRecord->Rsi = 0; break;
-					case 7: exception_info->ContextRecord->Rdi = 0; break;
-					case 8: exception_info->ContextRecord->R8 = 0; break;
-					case 9: exception_info->ContextRecord->R9 = 0; break;
-					case 10: exception_info->ContextRecord->R10 = 0; break;
-					case 11: exception_info->ContextRecord->R11 = 0; break;
-					case 12: exception_info->ContextRecord->R12 = 0; break;
-					case 13: exception_info->ContextRecord->R13 = 0; break;
-					case 14: exception_info->ContextRecord->R14 = 0; break;
-					case 15: exception_info->ContextRecord->R15 = 0; break;
-					}
+				case 0: exception_info->ContextRecord->Rax = 0; break;
+				case 1: exception_info->ContextRecord->Rcx = 0; break;
+				case 2: exception_info->ContextRecord->Rdx = 0; break;
+				case 3: exception_info->ContextRecord->Rbx = 0; break;
+				case 5: exception_info->ContextRecord->Rbp = 0; break;
+				case 6: exception_info->ContextRecord->Rsi = 0; break;
+				case 7: exception_info->ContextRecord->Rdi = 0; break;
+				case 8: exception_info->ContextRecord->R8 = 0; break;
+				case 9: exception_info->ContextRecord->R9 = 0; break;
+				case 10: exception_info->ContextRecord->R10 = 0; break;
+				case 11: exception_info->ContextRecord->R11 = 0; break;
+				case 12: exception_info->ContextRecord->R12 = 0; break;
+				case 13: exception_info->ContextRecord->R13 = 0; break;
+				case 14: exception_info->ContextRecord->R14 = 0; break;
+				case 15: exception_info->ContextRecord->R15 = 0; break;
 				}
+			}
+			else
+			{
+				LOG(FATAL) << "Cannot safely resume non-read instruction (opcode " << HEX(opcode.opcode) << "), crashing";
+				return EXCEPTION_CONTINUE_SEARCH;
 			}
 		}
 

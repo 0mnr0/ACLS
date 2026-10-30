@@ -1,7 +1,6 @@
 #pragma once
 #include "game/gta/Entity.hpp"
 #include "game/gta/Ped.hpp"
-#include "game/gta/Player.hpp"
 #include "game/gta/Vehicle.hpp"
 
 namespace YimMenu
@@ -9,18 +8,12 @@ namespace YimMenu
 	class Self
 	{
 		Ped m_SelfPed;
-		Player m_SelfPlayer;
 		Vehicle m_Vehicle;
 
 	public:
 		static Ped GetPed()
 		{
 			return GetInstance().m_SelfPed;
-		}
-
-		static Player GetPlayer()
-		{
-			return GetInstance().m_SelfPlayer;
 		}
 
 		static Vehicle GetVehicle()
