@@ -1,4 +1,3 @@
-#include "game/pointers/Pointers.hpp"
 #include "game/frontend/Menu.hpp"
 #include "core/frontend/manager/UIManager.hpp"
 
@@ -6,11 +5,12 @@ namespace YimMenu
 {
 	void RenderClassicTheme()
 	{
-		
-		float windowWidth = *YimMenu::Pointers.ScreenResX / 2.5f;
-		float centerX = (*YimMenu::Pointers.ScreenResX - windowWidth) / 2.0f;
-		float centerY = *YimMenu::Pointers.ScreenResY / 5.0f;
-		ImVec2 windowSize(windowWidth, *YimMenu::Pointers.ScreenResY / 2.5f);
+		const auto& displaySize = ImGui::GetIO().DisplaySize;
+		float windowWidth = std::max(560.0f, displaySize.x * 0.75f);
+		float windowHeight = std::max(380.0f, displaySize.y * 0.75f);
+		float centerX = (displaySize.x - windowWidth) / 2.0f;
+		float centerY = (displaySize.y - windowHeight) / 2.0f;
+		ImVec2 windowSize(windowWidth, windowHeight);
 
 		ImGui::SetNextWindowSize(windowSize, ImGuiCond_FirstUseEver);
 		ImGui::SetNextWindowPos(ImVec2(centerX, centerY), ImGuiCond_FirstUseEver);

@@ -22,12 +22,7 @@ namespace YimMenu
 
 		static bool IsUsingKeyboard()
 		{
-			return ImGui::GetIO().WantTextInput;
-		}
-
-		static void RunScript()
-		{
-			GetInstance().RunScriptImpl();
+			return ImGui::GetCurrentContext() && ImGui::GetIO().WantTextInput;
 		}
 
 		static void SetOnboarding(bool state)
@@ -48,32 +43,19 @@ namespace YimMenu
 		static void ToggleMouse();
 
 	private:
-
-		static void AcquireMouseOverride()
-		{
-			GetInstance().m_MouseOverrideCount.fetch_add(1);
-		}
-
-		static void ReleaseMouseOverride()
-		{
-			GetInstance().m_MouseOverrideCount.fetch_sub(1);
-		}
-
 		void WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
 
 		void InitImpl();
 		void SetOnboardingImpl(bool state);
-		void RunScriptImpl();
 
 		static GUI& GetInstance()
 		{
 			static GUI i{};
-
 			return i;
 		}
 
-		bool m_IsOpen;
-		bool m_Onboarding;
+		bool m_IsOpen{true};
+		bool m_Onboarding{false};
 		std::atomic<std::uint32_t> m_MouseOverrideCount{0};
 	};
 }

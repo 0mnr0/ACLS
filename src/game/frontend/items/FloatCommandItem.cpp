@@ -26,8 +26,12 @@ namespace YimMenu
 		if (!m_Command->GetMinimum().has_value() || !m_Command->GetMaximum().has_value() || !m_useSlider)
 		{
 			ImGui::SetNextItemWidth(150);
-			if (ImGui::InputFloat(label, &value))
+			if (ImGui::InputFloat(label, &value, 0.0f, 0.0f, "%.2f"))
 			{
+				if (m_Command->GetMinimum().has_value())
+					value = std::max(value, m_Command->GetMinimum().value());
+				if (m_Command->GetMaximum().has_value())
+					value = std::min(value, m_Command->GetMaximum().value());
 				m_Command->SetState(value);
 			}
 		}

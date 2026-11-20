@@ -10,7 +10,6 @@ namespace YimMenu::Submenus
 		auto main = std::make_shared<Category>("Main");
 		auto otherOpts = std::make_shared<Group>("Other", 1);
 
-		otherOpts->AddItem(std::make_shared<BoolCommandItem>("bypassbejoin"_J));
 		otherOpts->AddItem(std::make_shared<BoolCommandItem>("enablecreatordevmode"_J));
 		otherOpts->AddItem(std::make_shared<BoolCommandItem>("nocalls"_J));
 

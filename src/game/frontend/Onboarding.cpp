@@ -1,9 +1,7 @@
 #include "Onboarding.hpp"
 #include "GUI.hpp"
-#include "core/commands/Commands.hpp"
 #include "core/commands/BoolCommand.hpp"
-#include "game/backend/AnticheatBypass.hpp"
-#include "game/pointers/Pointers.hpp"
+#include "core/commands/Commands.hpp"
 #include <shellapi.h>
 
 namespace YimMenu
@@ -16,45 +14,35 @@ namespace YimMenu
 			return;
 
 		static bool ensure_popup_open = [] {
-			ImGui::OpenPopup("IMPORTANT! PLEASE READ!");
+			ImGui::OpenPopup("SafeYimV2 DMA");
 			GUI::SetOnboarding(true);
 			return true;
 		}();
 
-		const auto window_size = ImVec2{700, 500};
-		const auto window_position = ImVec2{(*Pointers.ScreenResX - window_size.x) / 2, (*Pointers.ScreenResY - window_size.y) / 2};
+		const auto& displaySize = ImGui::GetIO().DisplaySize;
+		const auto window_size = ImVec2{580, 320};
+		const auto window_position = ImVec2{(displaySize.x - window_size.x) / 2.0f, (displaySize.y - window_size.y) / 2.0f};
 
 		ImGui::SetNextWindowSize(window_size, ImGuiCond_Once);
 		ImGui::SetNextWindowPos(window_position, ImGuiCond_Once);
 
-		if (ImGui::BeginPopupModal("IMPORTANT! PLEASE READ!", nullptr, ImGuiWindowFlags_NoSavedSettings))
+		if (ImGui::BeginPopupModal("SafeYimV2 DMA", nullptr, ImGuiWindowFlags_NoSavedSettings))
 		{
 			ImGui::TextWrapped("%s",
-			    "Welcome to SafeYimV2! You can press INSERT or Ctrl+\\ to open the menu. With the introduction of BattlEye, the ability to join and stay in public sessions has been severely limited. "
-			    "You have an option to play only with other YimMenu users, or you can choose to connect to regular BattlEye-protected sessions. "
-			    "You will automatically be kicked out of regular sessions in under three minutes, and you may be temporarily blacklisted from "
-			    "joining for up to two days, even after re-enabling BattlEye");
-			static int value = 0;
-			ImGui::RadioButton("Play with YimMenu users", &value, 0);
-			ImGui::SameLine();
-			ImGui::RadioButton("Play with everyone (Broken!)", &value, 1);
+			    "Welcome to SafeYimV2 DMA Edition! This external application communicates with GTA5_Enhanced.exe over a PCIe DMA device using MemProcFS (vmm.dll / leechcore.dll).");
+			ImGui::Spacing();
 			ImGui::TextWrapped("%s",
-			    "You can always change your choice by toggling Network > Spoofing > Join YimMenu-only Sessions. Our official repository is at "
-			    "https://github.com/0mnr0/ACLS. Make sure to only download the menu from GitHub to avoid malware. "
-			    "You can use the repository to report bugs, suggest features, and contribute by making pull requests. We also have a "
-			    "Matrix server that can be found at https://matrix.to/#/#yimmenu:matrix.org for faster communication with developers "
-			    "and other users. Matrix is a free and open source alternative to Discord, and creating an account is safe and easy");
+			    "Place vmm.dll, leechcore.dll, and FTD3XX.dll next to the executable, launch GTA5_Enhanced.exe on the gaming PC, and use the DMA tab to connect or configure device options.");
+			ImGui::Spacing();
+			ImGui::TextWrapped("%s",
+			    "Note: Features requiring internal code hooks or native invocation are omitted in DMA mode; only direct memory features are active.");
+			ImGui::Spacing();
+
 			if (ImGui::Button("Open GitHub"))
 			{
 				ShellExecuteA(NULL, "open", "https://github.com/0mnr0/ACLS", NULL, NULL, SW_SHOWNORMAL);
 			}
 			ImGui::SameLine();
-			if (ImGui::Button("Open Matrix server"))
-			{
-				ShellExecuteA(NULL, "open", "https://matrix.to/#/#yimmenu:matrix.org", NULL, NULL, SW_SHOWNORMAL);
-			}
-			ImGui::TextWrapped("%s",
-			    "Check for updates reguarly; we publish new builds every night. But most importantly, mess around and have fun with YimMenu!");
 			if (ImGui::Button("Close"))
 			{
 				_OnboardingComplete.SetState(true);

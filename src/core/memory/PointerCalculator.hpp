@@ -1,4 +1,5 @@
 #pragma once
+#include "core/dma/IMemory.hpp"
 #include <cstdint>
 #include <type_traits>
 
@@ -10,17 +11,8 @@ namespace YimMenu
 		std::uintptr_t m_InternalPtr;
 
 	public:
-		inline PointerCalculator(void* ptr = nullptr);
-		inline PointerCalculator(std::uintptr_t ptr);
-		template<typename T>
-		inline PointerCalculator(T* ptr);
-		virtual ~PointerCalculator() = default;
-
-		template<typename T>
-		std::enable_if_t<std::is_pointer_v<T>, T> As() const;
-
-		template<typename T>
-		std::enable_if_t<std::is_lvalue_reference_v<T>, T> As() const;
+		inline PointerCalculator(std::uintptr_t ptr = 0);
+		~PointerCalculator() = default;
 
 		template<typename T>
 		std::enable_if_t<std::is_same_v<T, std::uintptr_t>, T> As() const;
@@ -32,38 +24,16 @@ namespace YimMenu
 		PointerCalculator Sub(T offset) const;
 
 		PointerCalculator Rip() const;
+		PointerCalculator Deref() const;
 
 		explicit operator bool() const;
-		friend bool operator==(PointerCalculator& a, PointerCalculator& b);
-		friend bool operator!=(PointerCalculator& a, PointerCalculator& b);
+		friend bool operator==(const PointerCalculator& a, const PointerCalculator& b);
+		friend bool operator!=(const PointerCalculator& a, const PointerCalculator& b);
 	};
-
-	inline PointerCalculator::PointerCalculator(void* ptr) :
-	    m_InternalPtr(reinterpret_cast<std::uintptr_t>(ptr))
-	{
-	}
 
 	inline PointerCalculator::PointerCalculator(std::uintptr_t ptr) :
 	    m_InternalPtr(ptr)
 	{
-	}
-
-	template<typename T>
-	inline PointerCalculator::PointerCalculator(T* ptr) :
-	    m_InternalPtr(reinterpret_cast<std::uintptr_t>(ptr))
-	{
-	}
-
-	template<typename T>
-	inline std::enable_if_t<std::is_pointer_v<T>, T> PointerCalculator::As() const
-	{
-		return reinterpret_cast<T>(m_InternalPtr);
-	}
-
-	template<typename T>
-	inline std::enable_if_t<std::is_lvalue_reference_v<T>, T> PointerCalculator::As() const
-	{
-		return *reinterpret_cast<std::add_pointer_t<std::remove_reference_t<T>>>(m_InternalPtr);
 	}
 
 	template<typename T>
@@ -75,18 +45,37 @@ namespace YimMenu
 	template<typename T>
 	inline PointerCalculator PointerCalculator::Add(T offset) const
 	{
-		return {m_InternalPtr + offset};
+		return PointerCalculator(m_InternalPtr + static_cast<std::uintptr_t>(offset));
 	}
 
 	template<typename T>
 	inline PointerCalculator PointerCalculator::Sub(T offset) const
 	{
-		return {m_InternalPtr - offset};
+		return PointerCalculator(m_InternalPtr - static_cast<std::uintptr_t>(offset));
 	}
 
 	inline PointerCalculator PointerCalculator::Rip() const
 	{
-		return Add(As<std::int32_t&>()).Add(4);
+		if (!m_InternalPtr || !g_Memory)
+			return PointerCalculator(0);
+
+		auto displacement = g_Memory->Read<std::int32_t>(m_InternalPtr);
+		if (!displacement.has_value())
+			return PointerCalculator(0);
+
+		return PointerCalculator(static_cast<std::uintptr_t>(static_cast<std::int64_t>(m_InternalPtr) + *displacement + 4));
+	}
+
+	inline PointerCalculator PointerCalculator::Deref() const
+	{
+		if (!m_InternalPtr || !g_Memory)
+			return PointerCalculator(0);
+
+		auto target = g_Memory->Read<std::uintptr_t>(m_InternalPtr);
+		if (!target.has_value())
+			return PointerCalculator(0);
+
+		return PointerCalculator(*target);
 	}
 
 	inline PointerCalculator::operator bool() const
@@ -94,12 +83,12 @@ namespace YimMenu
 		return m_InternalPtr != 0;
 	}
 
-	inline bool operator==(PointerCalculator& a, PointerCalculator& b)
+	inline bool operator==(const PointerCalculator& a, const PointerCalculator& b)
 	{
 		return a.m_InternalPtr == b.m_InternalPtr;
 	}
 
-	inline bool operator!=(PointerCalculator& a, PointerCalculator& b)
+	inline bool operator!=(const PointerCalculator& a, const PointerCalculator& b)
 	{
 		return a.m_InternalPtr != b.m_InternalPtr;
 	}

@@ -8,16 +8,15 @@ project(YimMenuV2 VERSION 0.0.1 DESCRIPTION "A new base using new C++ features o
 include(cmake/async-logger.cmake)
 include(cmake/imgui.cmake)
 include(cmake/json.cmake)
-include(cmake/minhook.cmake)
 
 # source
 set(SRC_DIR "${PROJECT_SOURCE_DIR}/src")
-file(GLOB_RECURSE SRC_FILES
+file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS
     "${SRC_DIR}/**.hpp"
     "${SRC_DIR}/**.cpp"    
 )
 
-add_library(${PROJECT_NAME} MODULE ${SRC_FILES})
+add_executable(${PROJECT_NAME} ${SRC_FILES})
 set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
 
 target_precompile_headers(${PROJECT_NAME} PUBLIC "${SRC_DIR}/common.hpp")
@@ -34,8 +33,6 @@ message(STATUS "Setting up include directories.")
 target_include_directories(${PROJECT_NAME} PRIVATE
     "${SRC_DIR}"
     "${imgui_SOURCE_DIR}"
-    "${minhook_SOURCE_DIR}/include"
-    "${minhook_SOURCE_DIR}/src/hde"
 )
 
 message(STATUS "Setting up linked libraries")
@@ -43,12 +40,11 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     # Project dependencies
     AsyncLogger
     imgui
-    minhook
     nlohmann_json::nlohmann_json
-    dbghelp
 
-    # ImGui dependencies
-    $<IF:$<BOOL:${CROSSCOMPILE}>,d3dcompiler_47,d3dcompiler>
+    # ImGui / Standalone DX11 dependencies
+    d3d11
+    dxgi
     dwmapi
     gdi32
 )

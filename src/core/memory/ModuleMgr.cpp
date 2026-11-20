@@ -1,5 +1,6 @@
 #include "ModuleMgr.hpp"
 
+#include "core/dma/IMemory.hpp"
 #include "core/util/Joaat.hpp"
 
 namespace YimMenu
@@ -22,45 +23,25 @@ namespace YimMenu
 	{
 		m_CachedModules.clear();
 
-		m_ManualMapped = true;
-
-		const auto peb = reinterpret_cast<PPEB>(NtCurrentTeb()->ProcessEnvironmentBlock);
-		if (!peb)
+		if (!g_Memory || !g_Memory->IsProcessAttached())
 			return false;
 
-		const auto ldrData = peb->Ldr;
-		if (!ldrData)
+		auto modules = g_Memory->GetModules();
+		if (modules.empty())
 			return false;
 
-		const auto moduleList = &ldrData->InMemoryOrderModuleList;
-		auto moduleEntry = moduleList->Flink;
-		for (; moduleList != moduleEntry; moduleEntry = moduleEntry->Flink)
+		for (auto& info : modules)
 		{
-			const auto tableEntry = CONTAINING_RECORD(moduleEntry, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks);
-			if (!tableEntry)
-				continue;
-
-			if (tableEntry->FullDllName.Buffer)
-			{
-				auto module = std::make_unique<Module>(tableEntry);
-
-				if (module->Base() == reinterpret_cast<uint64_t>(g_DllInstance))
-					m_ManualMapped = false;
-
-				m_CachedModules.insert({Joaat(module->Name()), std::move(module)});
-			}
+			const auto hash = Joaat(info.name);
+			auto mod = std::make_unique<Module>(std::move(info));
+			m_CachedModules.insert({hash, std::move(mod)});
 		}
 
-		return true;
+		return !m_CachedModules.empty();
 	}
 
 	std::unordered_multimap<std::uint32_t, std::unique_ptr<Module>>& ModuleMgr::GetModules()
 	{
 		return m_CachedModules;
-	}
-
-	bool ModuleMgr::IsManualMapped()
-	{
-		return m_ManualMapped;
 	}
 }

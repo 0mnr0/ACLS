@@ -2,62 +2,78 @@
 
 namespace YimMenu
 {
-	Module::Module(LDR_DATA_TABLE_ENTRY* dllEntry) :
-	    m_Path(dllEntry->FullDllName.Buffer),
-	    m_Name(m_Path.filename().string()),
-	    m_Base(dllEntry->DllBase),
-	    m_Size(0)
+	Module::Module(RemoteModuleInfo info) :
+	    m_Path(std::move(info.fullPath)),
+	    m_Name(std::move(info.name)),
+	    m_Base(info.base),
+	    m_Size(info.size),
+	    m_CodeSize(info.size)
 	{
-		const auto ntHeader = GetNtHeader();
-		if (ntHeader)
+		if (g_Memory && m_Base)
 		{
-			m_Size = ntHeader->OptionalHeader.SizeOfCode;
-		}
-	}
-
-	const std::string_view Module::Name() const
-	{
-		return m_Name;
-	}
-
-	void** Module::GetImport(const std::string_view moduleName, const std::string_view symbolName) const
-	{
-		const auto ntHeader = GetNtHeader();
-		if (!ntHeader)
-			return nullptr;
-
-		const auto imageDataDirectory = ntHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-
-		auto importDescriptor = m_Base.Add(imageDataDirectory.VirtualAddress).As<IMAGE_IMPORT_DESCRIPTOR*>();
-		for (; importDescriptor->Name; importDescriptor++)
-		{
-			if (const auto modName = m_Base.Add(importDescriptor->Name).As<const char*>(); strcmp(modName, moduleName.data()))
-				continue;
-
-			auto firstThunk = m_Base.Add(importDescriptor->FirstThunk).As<IMAGE_THUNK_DATA*>();
-			auto origThunk = m_Base.Add(importDescriptor->OriginalFirstThunk).As<IMAGE_THUNK_DATA*>();
-			for (; origThunk->u1.AddressOfData != 0; firstThunk++, origThunk++)
+			std::array<std::uint8_t, 0x1000> header{};
+			if (g_Memory->ReadBuffer(m_Base, header.data(), header.size(), false))
 			{
-				if (const auto importData = m_Base.Add(origThunk->u1.AddressOfData).As<IMAGE_IMPORT_BY_NAME*>();
-				    strcmp(importData->Name, symbolName.data()))
-					continue;
-				return reinterpret_cast<void**>(&firstThunk->u1.Function);
+				const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(header.data());
+				if (dos->e_magic == IMAGE_DOS_SIGNATURE && dos->e_lfanew >= 0 && static_cast<std::size_t>(dos->e_lfanew) + sizeof(IMAGE_NT_HEADERS64) <= header.size())
+				{
+					const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(header.data() + dos->e_lfanew);
+					if (nt->Signature == IMAGE_NT_SIGNATURE)
+					{
+						m_TimeDateStamp = nt->FileHeader.TimeDateStamp;
+						if (nt->OptionalHeader.SizeOfCode > 0)
+							m_CodeSize = nt->OptionalHeader.SizeOfCode;
+					}
+				}
 			}
 		}
-		return nullptr;
 	}
 
-	bool Module::Valid() const
+	bool Module::CacheImage()
 	{
-		return m_Size;
+		if (!m_CachedImage.empty())
+			return true;
+
+		if (!Valid() || !g_Memory)
+			return false;
+
+		const std::size_t scanSize = m_Size;
+		m_CachedImage.resize(scanSize, 0);
+
+		constexpr std::size_t chunkSize = 0x100000; // 1 MB chunks
+		bool anyRead = false;
+
+		for (std::size_t offset = 0; offset < scanSize; offset += chunkSize)
+		{
+			const std::size_t toRead = std::min(chunkSize, scanSize - offset);
+			if (g_Memory->ReadBuffer(m_Base + offset, m_CachedImage.data() + offset, toRead, false))
+			{
+				anyRead = true;
+			}
+			else if (auto scatter = g_Memory->CreateScatterHandle(false))
+			{
+				for (std::size_t page = 0; page < toRead; page += 0x1000)
+				{
+					const std::size_t pageBytes = std::min<std::size_t>(0x1000, toRead - page);
+					scatter->PrepareRead(m_Base + offset + page, m_CachedImage.data() + offset + page, pageBytes);
+				}
+				if (scatter->Execute())
+					anyRead = true;
+			}
+		}
+
+		if (!anyRead)
+		{
+			m_CachedImage.clear();
+			return false;
+		}
+
+		return true;
 	}
 
-	IMAGE_NT_HEADERS* Module::GetNtHeader() const
+	void Module::ClearCache()
 	{
-		if (!m_Base)
-			return nullptr;
-
-		const auto offset = m_Base.As<IMAGE_DOS_HEADER*>()->e_lfanew;
-		return m_Base.Add(offset).As<IMAGE_NT_HEADERS*>();
+		m_CachedImage.clear();
+		m_CachedImage.shrink_to_fit();
 	}
 }

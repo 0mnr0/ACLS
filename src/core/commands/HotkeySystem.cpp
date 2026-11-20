@@ -1,16 +1,10 @@
 #include "HotkeySystem.hpp"
 #include "core/backend/FiberPool.hpp"
 #include "core/backend/ScriptMgr.hpp"
-#include "core/renderer/D3D12Hook.hpp"
 #include "core/renderer/Renderer.hpp"
 #include "Commands.hpp"
 #include "LoopedCommand.hpp"
 #include "core/util/Joaat.hpp"
-
-// TODO: serialization isn't stable
-
-#include "game/pointers/Pointers.hpp" // game import in core!
-#include "game/gta/Natives.hpp"       // game import in core!
 #include "game/frontend/GUI.hpp"
 
 namespace YimMenu
@@ -29,12 +23,6 @@ namespace YimMenu
 			CommandLink link;
 			m_CommandHotkeys.insert(std::make_pair(hash, link));
 		}
-
-		if (auto it = m_CommandHotkeys.find("chathelper"_J); it != m_CommandHotkeys.end())
-		{
-			it->second.m_Chain.clear();
-			it->second.m_Chain.push_back(0x54);
-		}
 	}
 
 	bool HotkeySystem::ListenAndApply(int& Hotkey, std::vector<int> Blacklist)
@@ -47,13 +35,11 @@ namespace YimMenu
 			return false;
 		};
 
-		// VK_OEM_CLEAR Is about the limit in terms of virtual key codes
 		for (int i = 0; i < VK_OEM_CLEAR; i++)
 		{
 			if ((GetKeyState(i) & 0x8000) && i != 1 && !IsKeyBlacklisted(i))
 			{
 				Hotkey = i;
-
 				return true;
 			}
 		}
@@ -61,7 +47,6 @@ namespace YimMenu
 		return false;
 	}
 
-	// Will return the keycode if there are no labels
 	std::string HotkeySystem::GetHotkeyLabel(int HotkeyModifier)
 	{
 		char KeyName[32];
@@ -73,7 +58,6 @@ namespace YimMenu
 		return KeyName;
 	}
 
-	// Meant to be called in a loop
 	void HotkeySystem::CreateHotkey(std::vector<int>& chain)
 	{
 		static auto is_key_unique = [this](int Key, std::vector<int> List) -> bool {
@@ -100,7 +84,7 @@ namespace YimMenu
 	{
 		while (g_Running)
 		{
-			if (GetForegroundWindow() == D3D12Hook::GetWindow() && !HUD::IS_PAUSE_MENU_ACTIVE() && !HUD::IS_SOCIAL_CLUB_ACTIVE() && !m_BeingModified && (Renderer::IsInitialized() && !GUI::IsUsingKeyboard()))
+			if (GetForegroundWindow() == Renderer::GetWindow() && !m_BeingModified && Renderer::IsInitialized() && !GUI::IsUsingKeyboard())
 			{
 				for (auto& [hash, link] : m_CommandHotkeys)
 				{
@@ -122,15 +106,7 @@ namespace YimMenu
 						auto command = Commands::GetCommand(hash);
 						if (command)
 						{
-							// TODO: this is the only way I can prevent chat from blocking the main loop while keeping everything else fast
-							if (hash != "chathelper"_J)
-								command->Call();
-							else
-							{
-								FiberPool::Push([command] {
-									command->Call();
-								});
-							}
+							command->Call();
 						}
 						m_LastHotkeyTriggerTime = std::chrono::system_clock::now();
 					}

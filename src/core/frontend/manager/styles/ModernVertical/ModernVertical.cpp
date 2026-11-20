@@ -1,4 +1,3 @@
-#include "game/pointers/Pointers.hpp"
 #include "game/frontend/Menu.hpp"
 #include "core/frontend/manager/UIManager.hpp"
 
@@ -118,10 +117,11 @@ namespace YimMenu
 		// Content window
 		if (YimMenu::UIManager::ShowingContentWindow() && activeSubmenu)
 		{
-			float windowWidth = *YimMenu::Pointers.ScreenResX / 2.5f;
-			float centerX = (*YimMenu::Pointers.ScreenResX - windowWidth) / 2.0f;
-			float centerY = *YimMenu::Pointers.ScreenResY / 5.0f;
-			ImVec2 windowSize(windowWidth, *YimMenu::Pointers.ScreenResY / 2.5f);
+			float windowWidth = std::max(520.0f, io.DisplaySize.x * 0.65f);
+			float windowHeight = std::max(340.0f, io.DisplaySize.y * 0.65f);
+			float centerX = (io.DisplaySize.x - windowWidth) / 2.0f;
+			float centerY = io.DisplaySize.y / 5.0f;
+			ImVec2 windowSize(windowWidth, windowHeight);
 
 			ImGui::SetNextWindowSize(windowSize, ImGuiCond_FirstUseEver);
 			ImGui::SetNextWindowPos(ImVec2(centerX, centerY), ImGuiCond_FirstUseEver);

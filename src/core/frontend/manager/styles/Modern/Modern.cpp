@@ -1,4 +1,3 @@
-#include "game/pointers/Pointers.hpp"
 #include "game/frontend/Menu.hpp"
 #include "core/frontend/manager/UIManager.hpp"
 
@@ -19,7 +18,7 @@ namespace YimMenu
 		static bool dragging = false;
 		static ImVec2 dragStart = ImVec2(0, 0);
 
-		ImVec2 defaultBasePos((*YimMenu::Pointers.ScreenResX / 2.0f) - (bubbleSpacing * YimMenu::UIManager::GetSubmenus().size() / 2.0f), 80.0f);
+		ImVec2 defaultBasePos((io.DisplaySize.x / 2.0f) - (bubbleSpacing * YimMenu::UIManager::GetSubmenus().size() / 2.0f), 80.0f);
 		ImVec2 basePos = defaultBasePos + basePosOffset;
 
 		ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -115,10 +114,11 @@ namespace YimMenu
 		// Content window
 		if (YimMenu::UIManager::ShowingContentWindow() && activeSubmenu)
 		{
-			float windowWidth = *YimMenu::Pointers.ScreenResX / 2.5f;
-			float centerX = (*YimMenu::Pointers.ScreenResX - windowWidth) / 2.0f;
-			float centerY = *YimMenu::Pointers.ScreenResY / 5.0f;
-			ImVec2 windowSize(windowWidth, *YimMenu::Pointers.ScreenResY / 2.5f);
+			float windowWidth = std::max(520.0f, io.DisplaySize.x * 0.65f);
+			float windowHeight = std::max(340.0f, io.DisplaySize.y * 0.65f);
+			float centerX = (io.DisplaySize.x - windowWidth) / 2.0f;
+			float centerY = io.DisplaySize.y / 5.0f;
+			ImVec2 windowSize(windowWidth, windowHeight);
 
 			ImGui::SetNextWindowSize(windowSize, ImGuiCond_FirstUseEver);
 			ImGui::SetNextWindowPos(ImVec2(centerX, centerY), ImGuiCond_FirstUseEver);

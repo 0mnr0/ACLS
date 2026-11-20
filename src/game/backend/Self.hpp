@@ -1,29 +1,39 @@
 #pragma once
-#include "game/gta/Entity.hpp"
-#include "game/gta/Ped.hpp"
-#include "game/gta/Vehicle.hpp"
+#include <cstdint>
 
 namespace YimMenu
 {
 	class Self
 	{
-		Ped m_SelfPed;
-		Vehicle m_Vehicle;
+		std::uintptr_t m_LocalPed{0};
+		std::uintptr_t m_Vehicle{0};
+		std::uintptr_t m_PedVehicleOffset{0xD10};
+		std::uint8_t m_PlayerId{0};
 
 	public:
-		static Ped GetPed()
+		static std::uintptr_t GetPedPtr()
 		{
-			return GetInstance().m_SelfPed;
+			return GetInstance().m_LocalPed;
 		}
 
-		static Vehicle GetVehicle()
+		static std::uintptr_t GetVehiclePtr()
 		{
 			return GetInstance().m_Vehicle;
 		}
 
-		static void RunScript()
+		static std::uint8_t GetPlayerId()
 		{
-			GetInstance().RunScriptImpl();
+			return GetInstance().m_PlayerId;
+		}
+
+		static void SetVehicleOffset(std::uintptr_t offset)
+		{
+			GetInstance().m_PedVehicleOffset = offset;
+		}
+
+		static std::uintptr_t GetVehicleOffset()
+		{
+			return GetInstance().m_PedVehicleOffset;
 		}
 
 		static void Update()
@@ -31,10 +41,15 @@ namespace YimMenu
 			GetInstance().UpdateImpl();
 		}
 
+		static void Reset()
+		{
+			GetInstance().ResetImpl();
+		}
+
 	private:
-		Self();
-		void RunScriptImpl();
+		Self() = default;
 		void UpdateImpl();
+		void ResetImpl();
 
 		static Self& GetInstance()
 		{

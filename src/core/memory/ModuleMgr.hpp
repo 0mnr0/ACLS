@@ -16,21 +16,13 @@ namespace YimMenu
 		ModuleMgr& operator=(const ModuleMgr&) = delete;
 		ModuleMgr& operator=(ModuleMgr&&) noexcept = delete;
 
-		Module* Get(const std::string_view name);
+		Module* Get(std::string_view name);
 		Module* Get(joaat_t hash);
 
-		/**
-		 * @brief Loads the modules from PEB and caches them.
-		 * 
-		 * @return true If the peb is found and modules have been cached.
-		 * @return false If the peb or peb->Ldr pointer were invalid. 
-		 */
 		bool LoadModules();
 		std::unordered_multimap<std::uint32_t, std::unique_ptr<Module>>& GetModules();
-		bool IsManualMapped();
 
 	private:
-		bool m_ManualMapped = false;
 		std::unordered_multimap<std::uint32_t, std::unique_ptr<Module>> m_CachedModules;
 	};
 

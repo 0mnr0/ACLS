@@ -5,7 +5,7 @@ namespace YimMenu
 {
 	class ScriptPointer
 	{
-		const std::string m_Name;
+		std::string m_Name;
 		SimplePattern m_Pattern;
 		std::int32_t m_Offset;
 		bool m_Rip;
@@ -17,16 +17,15 @@ namespace YimMenu
 		ScriptPointer Add(std::uint32_t offset);
 		ScriptPointer Sub(std::uint32_t offset);
 		ScriptPointer Rip();
-		ScriptPointer Scan(rage::scrProgram* program);
-		ScriptPointer Scan(ScriptData* data); // For script patches
+		ScriptPointer Scan(ScriptData* data);
 
 		template<typename T>
-		T As()
+		T As() const
 		{
-			return (T)m_Address;
+			return static_cast<T>(m_Address);
 		}
 
-		std::string GetName() const
+		const std::string& GetName() const
 		{
 			return m_Name;
 		}

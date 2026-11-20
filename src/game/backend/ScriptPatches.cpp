@@ -1,203 +1,335 @@
 #include "ScriptPatches.hpp"
-
-#include "game/backend/ScriptPointers.hpp"
+#include "core/dma/IMemory.hpp"
 #include "game/pointers/Pointers.hpp"
-
 #include "types/script/scrProgram.hpp"
+#include <array>
 
 namespace YimMenu
 {
-	std::optional<uint32_t> ScriptPatches::Patch::GetPC()
-	{
-		if (m_Pc.has_value())
-			return m_Pc;
-
-		auto data = GetInstance().GetDataImpl(m_Hash);
-
-		if (!data)
-			return std::nullopt;
-
-		if (auto address = ScriptPointers::GetPointer(m_Hash, Joaat(m_Pointer.GetName())))
-		{
-			m_Pc = address;
-		}
-		else
-		{
-			m_Pc = m_Pointer.Scan(data).As<std::uint32_t>();
-			ScriptPointers::CachePointer(m_Hash, Joaat(m_Pointer.GetName()), m_Pc.value());
-		}
-
-		return m_Pc;
-	}
-
-	void ScriptPatches::Patch::Apply()
-	{
-		auto pc = GetPC();
-		auto data = GetInstance().GetDataImpl(m_Hash);
-
-		if (!pc || !data)
-			return;
-
-		if (m_OriginalBytes.size() == 0)
-		{
-			m_OriginalBytes.resize(m_PatchedBytes.size());
-			memcpy(m_OriginalBytes.data(), ScriptData::GetCodeLocation(data, pc.value()), m_PatchedBytes.size());
-		}
-
-		memcpy(ScriptData::GetCodeLocation(data, pc.value()), m_PatchedBytes.data(), m_PatchedBytes.size());
-	}
-
-	void ScriptPatches::Patch::Restore()
-	{
-		if (m_OriginalBytes.size() == 0)
-			return; // nothing to restore
-
-		auto pc = GetPC();
-		auto data = GetInstance().GetDataImpl(m_Hash);
-
-		if (!pc || !data)
-			return;
-
-		memcpy(ScriptData::GetCodeLocation(data, pc.value()), m_OriginalBytes.data(), m_OriginalBytes.size());
-	}
-
-	ScriptPatches::Patch::Patch(joaat_t script, ScriptPointer pointer, std::vector<uint8_t> patch) :
-	    m_PatchedBytes(patch),
-	    m_Pointer(pointer),
-	    m_Enabled(false),
-	    m_Pc(std::nullopt),
-	    m_OriginalBytes({}),
+	ScriptPatches::Patch::Patch(joaat_t script, ScriptPointer pointer, std::vector<std::uint8_t> patch) :
+	    m_PatchedBytes(std::move(patch)),
+	    m_Pointer(std::move(pointer)),
 	    m_Hash(script)
 	{
 	}
 
+	std::optional<std::uint32_t> ScriptPatches::Patch::GetPC()
+	{
+		if (m_Pc.has_value())
+			return m_Pc;
+
+		auto data = ScriptPatches::GetInstance().GetDataImpl(m_Hash);
+		if (!data || !data->IsValid())
+			return std::nullopt;
+
+		auto ptr = m_Pointer.Scan(data);
+		if (auto addr = ptr.As<std::uint32_t>())
+		{
+			m_Pc = addr;
+			return m_Pc;
+		}
+
+		return std::nullopt;
+	}
+
+	void ScriptPatches::Patch::Apply()
+	{
+		if (!g_Memory || !Pointers.Initialized)
+			return;
+
+		auto data = ScriptPatches::GetInstance().GetDataImpl(m_Hash);
+		const auto progAddr = ScriptPatches::GetInstance().GetProgramAddrImpl(m_Hash);
+		if (!data || !data->IsValid() || !progAddr)
+			return;
+
+		if (m_Applied && m_AppliedProgramAddr == progAddr)
+			return;
+
+		// Program reloaded at a new address: invalidate cached PC before scanning again.
+		if (m_AppliedProgramAddr != progAddr)
+			m_Pc.reset();
+
+		auto pc = GetPC();
+		if (!pc.has_value())
+		{
+			LOG(WARNING) << "ScriptPatch failed to find PC for script: " << data->GetName();
+			return;
+		}
+
+		const std::size_t len = m_PatchedBytes.size();
+		if (*pc + len > data->GetSize())
+			return;
+
+		m_OriginalBytes.resize(len);
+		for (std::size_t i = 0; i < len; ++i)
+		{
+			const auto remoteAddr = data->GetRemoteCodeAddress(*pc + static_cast<std::uint32_t>(i));
+			if (!IMemory::IsValidUserAddress(remoteAddr))
+				return;
+
+			auto original = g_Memory->Read<std::uint8_t>(remoteAddr);
+			if (!original.has_value())
+				return;
+
+			m_OriginalBytes[i] = *original;
+		}
+
+		for (std::size_t i = 0; i < len; ++i)
+		{
+			const auto remoteAddr = data->GetRemoteCodeAddress(*pc + static_cast<std::uint32_t>(i));
+			if (!g_Memory->Write<std::uint8_t>(remoteAddr, m_PatchedBytes[i]))
+			{
+				LOG(WARNING) << "ScriptPatch failed to write remote bytecode at " << HEX(remoteAddr);
+				return;
+			}
+		}
+
+		m_Applied = true;
+		m_AppliedProgramAddr = progAddr;
+		LOG(INFO) << "Applied remote script patch in " << data->GetName() << " at PC 0x" << std::hex << *pc << std::dec;
+	}
+
+	void ScriptPatches::Patch::Restore()
+	{
+		if (!m_Applied || !m_Pc.has_value() || m_OriginalBytes.empty())
+		{
+			ResetRemoteState();
+			return;
+		}
+
+		if (!g_Memory || !Pointers.Initialized)
+		{
+			ResetRemoteState();
+			return;
+		}
+
+		auto data = ScriptPatches::GetInstance().GetDataImpl(m_Hash);
+		const auto currentProgAddr = ScriptPatches::GetInstance().GetProgramAddrImpl(m_Hash);
+		if (data && data->IsValid() && currentProgAddr == m_AppliedProgramAddr)
+		{
+			for (std::size_t i = 0; i < m_OriginalBytes.size(); ++i)
+			{
+				const auto remoteAddr = data->GetRemoteCodeAddress(*m_Pc + static_cast<std::uint32_t>(i));
+				if (IMemory::IsValidUserAddress(remoteAddr))
+				{
+					g_Memory->Write<std::uint8_t>(remoteAddr, m_OriginalBytes[i]);
+				}
+			}
+			LOG(INFO) << "Restored remote script patch in " << data->GetName();
+		}
+
+		ResetRemoteState();
+	}
+
+	void ScriptPatches::Patch::ResetRemoteState()
+	{
+		m_Applied = false;
+		m_AppliedProgramAddr = 0;
+		m_OriginalBytes.clear();
+		m_Pc.reset();
+	}
+
 	void ScriptPatches::Patch::Enable()
 	{
-		if (!m_Enabled)
+		std::lock_guard lock(ScriptPatches::GetInstance().m_Mutex);
+		if (m_Enabled && m_Applied)
+			return;
+
+		m_Enabled = true;
+		if (Pointers.Initialized)
 		{
+			ScriptPatches::GetInstance().RefreshProgramsImpl(true);
 			Apply();
-			m_Enabled = true;
 		}
 	}
 
 	void ScriptPatches::Patch::Disable()
 	{
-		if (m_Enabled)
+		std::lock_guard lock(ScriptPatches::GetInstance().m_Mutex);
+		m_Enabled = false;
+		if (m_Applied)
 		{
+			if (Pointers.Initialized)
+				ScriptPatches::GetInstance().RefreshProgramsImpl(true);
 			Restore();
-			m_Enabled = false;
 		}
 	}
 
 	void ScriptPatches::Patch::Update()
 	{
 		if (m_Enabled)
-		{
 			Apply();
-		}
-		else
-		{
+		else if (m_Applied)
 			Restore();
-		}
 	}
 
-	bool ScriptPatches::Patch::InScope(std::uint32_t hash)
+	bool ScriptPatches::Patch::InScope(std::uint32_t hash) const
 	{
 		return m_Hash == hash;
 	}
 
-	std::shared_ptr<ScriptPatches::Patch> ScriptPatches::AddPatchImpl(joaat_t script, ScriptPointer pointer, std::vector<uint8_t> patch)
+	ScriptPatches::~ScriptPatches()
 	{
-		auto scr_patch = std::make_shared<Patch>(script, pointer, patch);
-
-		// add patch to map
-		m_Patches.push_back(scr_patch);
-
-		// find existing programs to register
-		for (int i = 0; i < 176; i++)
+		std::lock_guard lock(m_Mutex);
+		for (auto& patch : m_Patches)
 		{
-			if (Pointers.ScriptPrograms[i] && Pointers.ScriptPrograms[i]->m_NameHash == script && Pointers.ScriptPrograms[i]->m_CodeSize && Pointers.ScriptPrograms[i]->m_CodeBlocks)
-				RegisterProgram(Pointers.ScriptPrograms[i]);
+			if (patch && patch->m_Applied)
+				patch->Restore();
 		}
+		m_Patches.clear();
+		m_Datas.clear();
+		m_ProgramAddrs.clear();
+	}
 
-		return scr_patch;
+	std::shared_ptr<ScriptPatches::Patch> ScriptPatches::AddPatchImpl(joaat_t script, ScriptPointer pointer, std::vector<std::uint8_t> patch)
+	{
+		std::lock_guard lock(m_Mutex);
+		auto instance = std::make_shared<Patch>(script, std::move(pointer), std::move(patch));
+		m_Patches.push_back(instance);
+		return instance;
 	}
 
 	void ScriptPatches::RemovePatchImpl(const std::shared_ptr<Patch>& patch)
 	{
 		if (!patch)
 			return;
-			
+
+		std::lock_guard lock(m_Mutex);
 		patch->Disable();
 		std::erase(m_Patches, patch);
 	}
 
-	void ScriptPatches::RegisterProgramImpl(rage::scrProgram* program)
+	void ScriptPatches::TickImpl()
 	{
-		if (auto it = m_Datas.find(program->m_NameHash); it != m_Datas.end())
-		{
+		std::lock_guard lock(m_Mutex);
+		if (!Pointers.Initialized || !Pointers.ScriptPrograms || !g_Memory)
 			return;
-		}
 
-		// check if this program is in scope
-
-		bool in_scope = false;
-
-		for (auto& patch : m_Patches)
+		bool anyEnabled = false;
+		for (const auto& patch : m_Patches)
 		{
-			if (patch->InScope(program->m_NameHash))
+			if (patch && patch->IsEnabled())
 			{
-				in_scope = true;
+				anyEnabled = true;
 				break;
 			}
 		}
 
-		if (!in_scope)
-			return; // avoid polluting memory with unused program bytecode
+		if (!anyEnabled)
+			return;
 
-		m_Datas.emplace(program->m_NameHash, std::move(std::make_unique<ScriptData>(program)));
+		const auto now = std::chrono::steady_clock::now();
+		if (now - m_LastRefresh < std::chrono::milliseconds(750))
+			return;
 
-		// refresh patches so they can enable themselves
+		RefreshProgramsImpl(false);
+
 		for (auto& patch : m_Patches)
 		{
-			if (patch->InScope(program->m_NameHash))
+			if (patch && patch->IsEnabled())
+				patch->Apply();
+		}
+	}
+
+	void ScriptPatches::ResetImpl()
+	{
+		std::lock_guard lock(m_Mutex);
+		for (auto& patch : m_Patches)
+		{
+			if (patch)
+				patch->ResetRemoteState();
+		}
+		m_Datas.clear();
+		m_ProgramAddrs.clear();
+		m_LastRefresh = {};
+	}
+
+	void ScriptPatches::RefreshProgramsImpl(bool force)
+	{
+		if (!Pointers.Initialized || !Pointers.ScriptPrograms || !g_Memory)
+			return;
+
+		const auto now = std::chrono::steady_clock::now();
+		if (!force && (now - m_LastRefresh < std::chrono::milliseconds(750)))
+			return;
+
+		m_LastRefresh = now;
+
+		std::array<std::uintptr_t, 176> programPtrs{};
+		if (!g_Memory->ReadBuffer(Pointers.ScriptPrograms, programPtrs.data(), sizeof(programPtrs), false))
+			return;
+
+		struct RemoteScrProgramBuffer
+		{
+			alignas(rage::scrProgram) std::array<std::uint8_t, sizeof(rage::scrProgram)> bytes{};
+			const rage::scrProgram& AsProgram() const
 			{
-				patch->Update();
+				return *reinterpret_cast<const rage::scrProgram*>(bytes.data());
+			}
+		};
+
+		std::unordered_map<joaat_t, std::pair<std::uintptr_t, RemoteScrProgramBuffer>> activePrograms;
+		for (const auto ptr : programPtrs)
+		{
+			if (!IMemory::IsValidUserAddress(ptr))
+				continue;
+
+			RemoteScrProgramBuffer progBuf{};
+			if (!g_Memory->ReadBuffer(ptr, progBuf.bytes.data(), progBuf.bytes.size(), false))
+				continue;
+
+			const auto& prog = progBuf.AsProgram();
+			if (!prog.m_CodeBlocks || !prog.m_CodeSize)
+				continue;
+
+			bool tracked = false;
+			for (const auto& patch : m_Patches)
+			{
+				if (patch && patch->InScope(prog.m_NameHash))
+				{
+					tracked = true;
+					break;
+				}
+			}
+
+			if (tracked)
+				activePrograms.emplace(prog.m_NameHash, std::make_pair(ptr, progBuf));
+		}
+
+		// Drop unloaded scripts
+		for (auto it = m_ProgramAddrs.begin(); it != m_ProgramAddrs.end();)
+		{
+			const auto hash = it->first;
+			if (!activePrograms.contains(hash))
+			{
+				m_Datas.erase(hash);
+				for (auto& patch : m_Patches)
+				{
+					if (patch && patch->InScope(hash))
+						patch->ResetRemoteState();
+				}
+				it = m_ProgramAddrs.erase(it);
+			}
+			else
+			{
+				++it;
 			}
 		}
-	}
 
-	void ScriptPatches::UnregisterProgramImpl(rage::scrProgram* program)
-	{
-		// we currently do not unregister programs
-		// this leaks an acceptable amount of memory
-	}
-
-	void ScriptPatches::OnScriptVMEnterImpl(rage::scrProgram* program)
-	{
-		if (m_CurrentlyReplacedBytecode)
+		// Register or reload changed scripts
+		for (const auto& [hash, entry] : activePrograms)
 		{
-			LOG(FATAL) << "We've already shadowed the bytecode of another program!";
-			return;
-		}
+			const auto& [addr, progBuf] = entry;
+			const auto existingIt = m_ProgramAddrs.find(hash);
+			if (existingIt != m_ProgramAddrs.end() && existingIt->second == addr && m_Datas.contains(hash))
+				continue;
 
-		auto data = GetDataImpl(program->m_NameHash);
-
-		if (!data)
-		{
-			return; // nothing to do here
-		}
-
-		m_CurrentlyReplacedBytecode = program->m_CodeBlocks;
-		program->m_CodeBlocks = data->GetData();
-	}
-
-	void ScriptPatches::OnScriptVMLeaveImpl(rage::scrProgram* program)
-	{
-		if (m_CurrentlyReplacedBytecode)
-		{
-			program->m_CodeBlocks = m_CurrentlyReplacedBytecode;
-			m_CurrentlyReplacedBytecode = nullptr;
+			auto data = std::make_unique<ScriptData>(addr, progBuf.AsProgram());
+			if (data->IsValid())
+			{
+				m_Datas[hash] = std::move(data);
+				m_ProgramAddrs[hash] = addr;
+			}
 		}
 	}
 
@@ -209,14 +341,11 @@ namespace YimMenu
 		return nullptr;
 	}
 
-	ScriptPatches::ScriptPatches() :
-	    m_CurrentlyReplacedBytecode(nullptr)
+	std::uintptr_t ScriptPatches::GetProgramAddrImpl(joaat_t script)
 	{
-	}
+		if (auto it = m_ProgramAddrs.find(script); it != m_ProgramAddrs.end())
+			return it->second;
 
-	ScriptPatches::~ScriptPatches()
-	{
-		m_Patches.clear();
-		m_Datas.clear();
+		return 0;
 	}
 }

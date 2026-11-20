@@ -2,11 +2,8 @@
 #include "core/util/Joaat.hpp"
 #include "game/gta/ScriptData.hpp"
 #include "game/gta/ScriptPointer.hpp"
-
-namespace rage
-{
-	class scrProgram;
-}
+#include <chrono>
+#include <mutex>
 
 namespace YimMenu
 {
@@ -15,56 +12,55 @@ namespace YimMenu
 	public:
 		class Patch
 		{
-			std::vector<uint8_t> m_OriginalBytes;
-			std::vector<uint8_t> m_PatchedBytes;
-			std::optional<uint32_t> m_Pc;
+			std::vector<std::uint8_t> m_OriginalBytes;
+			std::vector<std::uint8_t> m_PatchedBytes;
+			std::optional<std::uint32_t> m_Pc;
 			ScriptPointer m_Pointer;
-			bool m_Enabled;
-			std::uint32_t m_Hash;
-			std::optional<uint32_t> GetPC();
+			bool m_Enabled{false};
+			bool m_Applied{false};
+			std::uintptr_t m_AppliedProgramAddr{0};
+			std::uint32_t m_Hash{0};
+
+			std::optional<std::uint32_t> GetPC();
 			void Apply();
 			void Restore();
+			void ResetRemoteState();
+
+			friend class ScriptPatches;
 
 		public:
-			Patch(joaat_t script, ScriptPointer pointer, std::vector<uint8_t> patch);
+			Patch(joaat_t script, ScriptPointer pointer, std::vector<std::uint8_t> patch);
 			void Enable();
 			void Disable();
 			void Update();
-			bool InScope(std::uint32_t hash);
+			bool InScope(std::uint32_t hash) const;
+			bool IsEnabled() const { return m_Enabled; }
+			bool IsApplied() const { return m_Applied; }
+			joaat_t GetScriptHash() const { return m_Hash; }
 		};
 
-		static std::shared_ptr<Patch> AddPatch(joaat_t script, ScriptPointer pointer, std::vector<uint8_t> patch)
+		static std::shared_ptr<Patch> AddPatch(joaat_t script, ScriptPointer pointer, std::vector<std::uint8_t> patch)
 		{
-			return GetInstance().AddPatchImpl(script, pointer, patch);
+			return GetInstance().AddPatchImpl(script, std::move(pointer), std::move(patch));
 		}
-		
+
 		static void RemovePatch(const std::shared_ptr<Patch>& patch)
 		{
 			GetInstance().RemovePatchImpl(patch);
 		}
 
-		static void RegisterProgram(rage::scrProgram* program)
+		static void Tick()
 		{
-			GetInstance().RegisterProgramImpl(program);
+			GetInstance().TickImpl();
 		}
 
-		static void UnregisterProgram(rage::scrProgram* program)
+		static void Reset()
 		{
-			GetInstance().UnregisterProgramImpl(program);
-		}
-
-		static void OnScriptVMEnter(rage::scrProgram* program)
-		{
-			GetInstance().OnScriptVMEnterImpl(program);
-		}
-
-		static void OnScriptVMLeave(rage::scrProgram* program)
-		{
-			GetInstance().OnScriptVMLeaveImpl(program);
+			GetInstance().ResetImpl();
 		}
 
 	private:
-		ScriptPatches();
+		ScriptPatches() = default;
 		~ScriptPatches();
 
 		static ScriptPatches& GetInstance()
@@ -73,17 +69,19 @@ namespace YimMenu
 			return Instance;
 		}
 
-		std::shared_ptr<Patch> AddPatchImpl(joaat_t script, ScriptPointer pointer, std::vector<uint8_t> patch);
+		std::shared_ptr<Patch> AddPatchImpl(joaat_t script, ScriptPointer pointer, std::vector<std::uint8_t> patch);
 		void RemovePatchImpl(const std::shared_ptr<Patch>& patch);
-		void RegisterProgramImpl(rage::scrProgram* program);
-		void UnregisterProgramImpl(rage::scrProgram* program);
-		void OnScriptVMEnterImpl(rage::scrProgram* program);
-		void OnScriptVMLeaveImpl(rage::scrProgram* program);
+		void TickImpl();
+		void ResetImpl();
+		void RefreshProgramsImpl(bool force);
 		ScriptData* GetDataImpl(joaat_t script);
+		std::uintptr_t GetProgramAddrImpl(joaat_t script);
 
+		std::recursive_mutex m_Mutex;
 		std::vector<std::shared_ptr<Patch>> m_Patches;
 		std::unordered_map<joaat_t, std::unique_ptr<ScriptData>> m_Datas;
-		std::uint8_t** m_CurrentlyReplacedBytecode;
+		std::unordered_map<joaat_t, std::uintptr_t> m_ProgramAddrs;
+		std::chrono::steady_clock::time_point m_LastRefresh{};
 	};
 
 	using ScriptPatch = std::shared_ptr<ScriptPatches::Patch>;

@@ -2,6 +2,7 @@
 #include "core/frontend/manager/UIManager.hpp"
 #include "core/renderer/Renderer.hpp"
 #include "game/frontend/fonts/Fonts.hpp"
+#include "submenus/DMA.hpp"
 #include "submenus/Vehicle.hpp"
 #include "submenus/Other.hpp"
 #include "Onboarding.hpp"
@@ -11,6 +12,7 @@ namespace YimMenu
 	void Menu::Init()
 	{
 		// Arguably the only place this file should be edited at for more menus
+		UIManager::AddSubmenu(std::make_shared<Submenus::DMA>());
 		UIManager::AddSubmenu(std::make_shared<Submenus::Vehicle>());
 		UIManager::AddSubmenu(std::make_shared<Submenus::Other>());
 

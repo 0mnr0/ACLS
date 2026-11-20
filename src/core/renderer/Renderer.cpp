@@ -1,411 +1,293 @@
 #include "Renderer.hpp"
-#include "D3D12Hook.hpp"
 #include "core/frontend/manager/styles/Themes.hpp"
 #include "game/frontend/Menu.hpp"
-#include <backends/imgui_impl_dx12.h>
+#include <backends/imgui_impl_dx11.h>
 #include <backends/imgui_impl_win32.h>
 #include <imgui.h>
 
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 namespace YimMenu
 {
-    void Renderer::InitImpl()
-    {
-        D3D12Hook::OnPresent([this] {
-            if (!m_Initialized)
-            {
-                if (!InitInternal())
-                    return;
-            }
-
-            Render();
-        });
-
-        D3D12Hook::OnResizeBuffers([this] {
-            Resize();
-        });
-
-        D3D12Hook::OnDeviceReset([this] {
-			Destroy();
-        });
-    }
-
-    bool Renderer::InitInternal()
-    {
-        auto swapChain = D3D12Hook::GetSwapChain();
-        auto queue = D3D12Hook::GetCommandQueue();
-        auto window = D3D12Hook::GetWindow();
-        if (!swapChain || !queue || !window)
-        {
-			//LOGF(FATAL, "Invalid D3D12Hook data.");
-            return false;
-        }
-
-        DXGI_SWAP_CHAIN_DESC desc{};
-        ComPtr<ID3D12Device> device{};
-        if (FAILED(swapChain->GetDesc(&desc)) || FAILED(swapChain->GetDevice(IID_PPV_ARGS(&device))))
-            return false;
-
-        UINT bufferCount = desc.BufferCount > 0 ? desc.BufferCount : 3;
-
-        m_Device = device;
-        m_Queue = queue;
-        m_RtvFormat = desc.BufferDesc.Format;
-
-        if (!CreateDeviceObjects(device.Get(), bufferCount))
-        {
-            LOGF(FATAL, "Failed to create device objects.");
-            ReleaseDeviceObjects();
-            return false;
-        }
-
-        CreateRenderTargets(swapChain);
-
-        ImGui::CreateContext();
-
-        ImGuiIO& io = ImGui::GetIO();
-        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-        ImGui::StyleColorsDark();
-
-        ImGui_ImplWin32_Init(window);
-
-        ImGui_ImplDX12_InitInfo initInfo{};
-        initInfo.Device = device.Get();
-        initInfo.CommandQueue = queue;
-        initInfo.NumFramesInFlight = static_cast<int>(bufferCount);
-        initInfo.RTVFormat = m_RtvFormat != DXGI_FORMAT_UNKNOWN ? m_RtvFormat : DXGI_FORMAT_R8G8B8A8_UNORM;
-        initInfo.DSVFormat = DXGI_FORMAT_UNKNOWN;
-        initInfo.SrvDescriptorHeap = m_SrvHeap.Get();
-        initInfo.UserData = &m_SrvAllocator;
-        initInfo.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo* info, D3D12_CPU_DESCRIPTOR_HANDLE* outCpu, D3D12_GPU_DESCRIPTOR_HANDLE* outGpu) {
-            static_cast<SrvHeapAllocator*>(info->UserData)->Alloc(outCpu, outGpu);
-        };
-        initInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo* info, D3D12_CPU_DESCRIPTOR_HANDLE cpu, D3D12_GPU_DESCRIPTOR_HANDLE gpu) {
-            static_cast<SrvHeapAllocator*>(info->UserData)->Free(cpu, gpu);
-        };
-
-        if (!ImGui_ImplDX12_Init(&initInfo))
-        {
-            LOGF(FATAL, "ImGui_ImplDX12_Init failed.");
-
-            ImGui_ImplWin32_Shutdown();
-            ImGui::DestroyContext();
-
-            ReleaseRenderTargets();
-            ReleaseDeviceObjects();
-            return false;
-        }
-
-        Menu::SetupFonts();
-        SetupStyle();
-        GUI::ToggleMouse();
-
-        {
-            std::scoped_lock lock{m_WndProcMutex};
-            m_Initialized = true;
-        }
-
-        LOGF(INFO, "Renderer initialized.");
-        return true;
-    }
-
-    void Renderer::DestroyImpl()
-    {
-        if (m_Initialized || m_DeviceObjectsValid)
-        {
-            bool wasInitialized = m_Initialized;
-
-            // waits for the GPU on our own queue before anything below is freed
-            ReleaseRenderTargets();
-
-            {
-                std::scoped_lock lock{m_WndProcMutex};
-
-                m_Initialized = false;
-
-                if (wasInitialized)
-                {
-                    ImGui_ImplDX12_Shutdown();
-                    ImGui_ImplWin32_Shutdown();
-                    ImGui::DestroyContext();
-                }
-            }
-
-            ReleaseDeviceObjects();
-        }
-    }
-
-    void Renderer::Render()
-    {
-        auto swapChain = D3D12Hook::GetSwapChain();
-        if (!swapChain || !m_Queue || !m_Device)
-            return;
-
-        if (FAILED(m_Device->GetDeviceRemovedReason()))
-            return;
-
-        if (!m_SafeToRender)
-            return;
-
-        const UINT index = swapChain->GetCurrentBackBufferIndex();
-        if (index >= m_FrameContexts.size() || index >= m_BackBuffers.size() || index >= m_RtvHandles.size())
-            return;
-
-        // if a resize happened, our cached backbuffer resources are stale, refresh them
-        {
-            ComPtr<ID3D12Resource> currentAtIndex{};
-            if (m_BackBuffers[index] == nullptr || (SUCCEEDED(swapChain->GetBuffer(index, IID_PPV_ARGS(&currentAtIndex))) && currentAtIndex.Get() != m_BackBuffers[index].Get()))
-                CreateRenderTargets(swapChain);
-        }
-
-        if (!m_BackBuffers[index])
-            return;
-
-        if (m_FontsUpdated)
-        {
-            WaitForGpu(2000);
-            ImGui_ImplDX12_InvalidateDeviceObjects();
-            ImGui_ImplDX12_CreateDeviceObjects();
-            m_FontsUpdated = false;
-        }
-
-        auto& frame = m_FrameContexts[index];
-
-        // wait for the GPU to be done with this frame context's allocator before reusing it
-        if (m_Fence->GetCompletedValue() < frame.FenceValue)
-        {
-            if (FAILED(m_Fence->SetEventOnCompletion(frame.FenceValue, m_FenceEvent)) || WaitForSingleObject(m_FenceEvent, 5000) != WAIT_OBJECT_0)
-                return;
-        }
-
-        if (FAILED(frame.Allocator->Reset()))
-            return;
-
-        if (FAILED(m_CommandList->Reset(frame.Allocator.Get(), nullptr)))
-            return;
-
-        D3D12_RESOURCE_BARRIER toRt{};
-        toRt.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        toRt.Transition.pResource = m_BackBuffers[index].Get();
-        toRt.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-        toRt.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-        toRt.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        m_CommandList->ResourceBarrier(1, &toRt);
-
-        m_CommandList->OMSetRenderTargets(1, &m_RtvHandles[index], FALSE, nullptr);
-        ID3D12DescriptorHeap* heaps[] = {m_SrvHeap.Get()};
-        m_CommandList->SetDescriptorHeaps(1, heaps);
-
-		GUI::ToggleMouse();
-        ImGui_ImplDX12_NewFrame();
-        ImGui_ImplWin32_NewFrame();
-        ImGui::NewFrame();
-
-        for (const auto& callback : m_RendererCallbacks | std::views::values)
-            callback();
-
-        ImGui::Render();
-
-        ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_CommandList.Get());
-
-        D3D12_RESOURCE_BARRIER toPresent{};
-        toPresent.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        toPresent.Transition.pResource = m_BackBuffers[index].Get();
-        toPresent.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-        toPresent.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-        toPresent.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        m_CommandList->ResourceBarrier(1, &toPresent);
-
-        // never submit a list that failed to record
-        if (FAILED(m_CommandList->Close()))
-            return;
-
-        ID3D12CommandList* lists[] = {m_CommandList.Get()};
-        m_Queue->ExecuteCommandLists(1, lists);
-
-        const UINT64 value = m_FenceValue + 1;
-        if (SUCCEEDED(m_Queue->Signal(m_Fence.Get(), value)))
-        {
-            m_FenceValue = value;
-            frame.FenceValue = value;
-        }
-    }
-
-    void Renderer::Resize()
-    {
-        if (!m_Initialized)
-            return;
-
-        ReleaseRenderTargets();
-    }
-
-    bool Renderer::CreateDeviceObjects(ID3D12Device* device, UINT bufferCount)
-    {
-        m_BufferCount = bufferCount;
-
-        D3D12_DESCRIPTOR_HEAP_DESC rtvDesc{};
-        rtvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-        rtvDesc.NumDescriptors = bufferCount;
-        rtvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-
-        if (FAILED(device->CreateDescriptorHeap(&rtvDesc, IID_PPV_ARGS(&m_RtvHeap))))
-            return false;
-
-        D3D12_DESCRIPTOR_HEAP_DESC srvDesc{};
-        srvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        srvDesc.NumDescriptors = 64;
-        srvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-
-        if (FAILED(device->CreateDescriptorHeap(&srvDesc, IID_PPV_ARGS(&m_SrvHeap))))
-            return false;
-
-        m_SrvAllocator.Init(device, m_SrvHeap.Get());
-
-        auto rtvIncrement = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-        auto rtvStart = m_RtvHeap->GetCPUDescriptorHandleForHeapStart();
-
-        m_FrameContexts.clear();
-        m_RtvHandles.clear();
-        m_BackBuffers.clear();
-        m_FrameContexts.resize(bufferCount);
-        m_RtvHandles.resize(bufferCount);
-        m_BackBuffers.resize(bufferCount);
-
-        for (UINT i = 0; i < bufferCount; i++)
-        {
-            if (FAILED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_FrameContexts[i].Allocator))))
-                return false;
-
-            m_RtvHandles[i] = {rtvStart.ptr + static_cast<SIZE_T>(i) * rtvIncrement};
-        }
-
-        if (FAILED(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_FrameContexts[0].Allocator.Get(), nullptr, IID_PPV_ARGS(&m_CommandList))))
-            return false;
-
-        m_CommandList->Close();
-
-        if (FAILED(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_Fence))))
-            return false;
-
-        m_FenceValue = 0;
-        m_FenceEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
-        if (!m_FenceEvent)
-            return false;
-
-        m_DeviceObjectsValid = true;
-        return true;
-    }
-
-    void Renderer::ReleaseDeviceObjects()
-    {
-        if (m_FenceEvent)
-        {
-            CloseHandle(m_FenceEvent);
-            m_FenceEvent = nullptr;
-        }
-
-        m_FrameContexts.clear();
-        m_BackBuffers.clear();
-        m_RtvHandles.clear();
-        m_CommandList.Reset();
-        m_Fence.Reset();
-        m_RtvHeap.Reset();
-        m_SrvHeap.Reset();
-        m_Queue.Reset();
-        m_Device.Reset();
-
-        m_FenceValue = 0;
-        m_BufferCount = 0;
-        m_DeviceObjectsValid = false;
-    }
-
-    void Renderer::CreateRenderTargets(IDXGISwapChain3* swapChain)
-    {
-        ComPtr<ID3D12Device> owningDevice{};
-        if (FAILED(swapChain->GetDevice(IID_PPV_ARGS(&owningDevice))))
-            return;
-
-        for (UINT i = 0; i < m_BufferCount && i < m_BackBuffers.size(); ++i)
-        {
-            if (FAILED(swapChain->GetBuffer(i, IID_PPV_ARGS(&m_BackBuffers[i]))))
-                continue;
-
-            owningDevice->CreateRenderTargetView(m_BackBuffers[i].Get(), nullptr, m_RtvHandles[i]);
-        }
-    }
-
-    void Renderer::WaitForGpu(DWORD timeoutMs)
-    {
-        if (!m_Fence || !m_FenceEvent || !m_Queue)
-            return;
-
-        const UINT64 value = m_FenceValue + 1;
-        if (FAILED(m_Queue->Signal(m_Fence.Get(), value)))
-            return;
-
-        m_FenceValue = value;
-
-        if (m_Fence->GetCompletedValue() < value)
-        {
-            if (SUCCEEDED(m_Fence->SetEventOnCompletion(value, m_FenceEvent)))
-                WaitForSingleObject(m_FenceEvent, timeoutMs);
-        }
-    }
-
-    void Renderer::ReleaseRenderTargets()
-    {
-        WaitForGpu(2000);
-
-        for (auto& bb : m_BackBuffers)
-            bb.Reset();
-    }
-
-    void Renderer::WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
-    {
-        std::scoped_lock lock{GetInstance().m_WndProcMutex};
-
-        if (!GetInstance().m_Initialized)
-            return;
-
-        for (const auto& callback : GetInstance().m_WindowProcedureCallbacks)
-            callback(hwnd, msg, wparam, lparam);
-
-        ImGui_ImplWin32_WndProcHandler(hwnd, msg, wparam, lparam);
-    }
-
-    void Renderer::SrvHeapAllocator::Init(ID3D12Device* device, ID3D12DescriptorHeap* srvHeap)
-    {
-        DescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-        HeapStartCpu = srvHeap->GetCPUDescriptorHandleForHeapStart();
-        HeapStartGpu = srvHeap->GetGPUDescriptorHandleForHeapStart();
-
-        FreeIndices.clear();
-        FreeIndices.reserve(64);
-        for (int i = 64 - 1; i >= 0; --i)
-            FreeIndices.push_back(i);
-    }
-
-    void Renderer::SrvHeapAllocator::Alloc(D3D12_CPU_DESCRIPTOR_HANDLE* outCpu, D3D12_GPU_DESCRIPTOR_HANDLE* outGpu)
-    {
-        if (FreeIndices.empty())
-        {
-            LOGF(FATAL, "SRV heap exhausted.");
-            *outCpu = HeapStartCpu;
-            *outGpu = HeapStartGpu;
-            return;
-        }
-
-        int index = FreeIndices.back();
-        FreeIndices.pop_back();
-
-        outCpu->ptr = HeapStartCpu.ptr + static_cast<SIZE_T>(index) * DescriptorSize;
-        outGpu->ptr = HeapStartGpu.ptr + static_cast<UINT64>(index) * DescriptorSize;
-    }
-
-    void Renderer::SrvHeapAllocator::Free(D3D12_CPU_DESCRIPTOR_HANDLE cpu, D3D12_GPU_DESCRIPTOR_HANDLE gpu)
-    {
-        int index = static_cast<int>((cpu.ptr - HeapStartCpu.ptr) / DescriptorSize);
-        FreeIndices.push_back(index);
-    }
+	bool Renderer::InitImpl()
+	{
+		if (m_Initialized)
+			return true;
+
+		m_WindowClass = {
+		    sizeof(WNDCLASSEXW),
+		    CS_CLASSDC,
+		    &Renderer::WndProc,
+		    0L,
+		    0L,
+		    GetModuleHandleW(nullptr),
+		    nullptr,
+		    LoadCursorW(nullptr, MAKEINTRESOURCEW(32512)),
+		    nullptr,
+		    nullptr,
+		    L"SafeYimV2DMAWindowClass",
+		    nullptr};
+
+		if (!RegisterClassExW(&m_WindowClass))
+		{
+			LOG(FATAL) << "Failed to register window class.";
+			return false;
+		}
+
+		m_Window = CreateWindowW(
+		    m_WindowClass.lpszClassName,
+		    L"SafeYimV2 DMA",
+		    WS_OVERLAPPEDWINDOW,
+		    100,
+		    100,
+		    1024,
+		    680,
+		    nullptr,
+		    nullptr,
+		    m_WindowClass.hInstance,
+		    nullptr);
+
+		if (!m_Window)
+		{
+			UnregisterClassW(m_WindowClass.lpszClassName, m_WindowClass.hInstance);
+			LOG(FATAL) << "Failed to create application window.";
+			return false;
+		}
+
+		if (!CreateDeviceD3D(m_Window))
+		{
+			CleanupDeviceD3D();
+			DestroyWindow(m_Window);
+			m_Window = nullptr;
+			UnregisterClassW(m_WindowClass.lpszClassName, m_WindowClass.hInstance);
+			LOG(FATAL) << "Failed to create D3D11 device.";
+			return false;
+		}
+
+		ShowWindow(m_Window, SW_SHOWDEFAULT);
+		UpdateWindow(m_Window);
+
+		IMGUI_CHECKVERSION();
+		ImGui::CreateContext();
+
+		ImGuiIO& io = ImGui::GetIO();
+		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+		ImGui::StyleColorsDark();
+
+		ImGui_ImplWin32_Init(m_Window);
+		ImGui_ImplDX11_Init(m_Device.Get(), m_DeviceContext.Get());
+
+		Menu::SetupFonts();
+		SetupStyle();
+
+		m_Initialized = true;
+		LOG(INFO) << "Standalone DX11 Renderer initialized.";
+		return true;
+	}
+
+	void Renderer::DestroyImpl()
+	{
+		if (!m_Initialized)
+			return;
+
+		m_Initialized = false;
+		m_SafeToRender = false;
+
+		ImGui_ImplDX11_Shutdown();
+		ImGui_ImplWin32_Shutdown();
+		ImGui::DestroyContext();
+
+		CleanupDeviceD3D();
+
+		if (m_Window)
+		{
+			DestroyWindow(m_Window);
+			m_Window = nullptr;
+		}
+
+		if (m_WindowClass.lpszClassName)
+		{
+			UnregisterClassW(m_WindowClass.lpszClassName, m_WindowClass.hInstance);
+			m_WindowClass = {};
+		}
+	}
+
+	bool Renderer::TickImpl()
+	{
+		if (!m_Initialized)
+			return false;
+
+		MSG msg{};
+		while (PeekMessageW(&msg, nullptr, 0U, 0U, PM_REMOVE))
+		{
+			TranslateMessage(&msg);
+			DispatchMessageW(&msg);
+			if (msg.message == WM_QUIT)
+			{
+				g_Running = false;
+				return false;
+			}
+		}
+
+		if (!g_Running)
+			return false;
+
+		if (m_ResizeWidth != 0 && m_ResizeHeight != 0)
+		{
+			CleanupRenderTarget();
+			m_SwapChain->ResizeBuffers(0, m_ResizeWidth, m_ResizeHeight, DXGI_FORMAT_UNKNOWN, 0);
+			m_ResizeWidth = 0;
+			m_ResizeHeight = 0;
+			CreateRenderTarget();
+		}
+
+		Render();
+		return true;
+	}
+
+	void Renderer::Render()
+	{
+		if (!m_SafeToRender || !m_RenderTargetView)
+			return;
+
+		if (m_FontsUpdated)
+		{
+			ImGui_ImplDX11_InvalidateDeviceObjects();
+			ImGui_ImplDX11_CreateDeviceObjects();
+			m_FontsUpdated = false;
+		}
+
+		ImGui_ImplDX11_NewFrame();
+		ImGui_ImplWin32_NewFrame();
+		ImGui::NewFrame();
+
+		for (const auto& callback : m_RendererCallbacks | std::views::values)
+			callback();
+
+		ImGui::Render();
+
+		constexpr float clearColor[4] = {0.07f, 0.07f, 0.09f, 1.0f};
+		ID3D11RenderTargetView* rtv = m_RenderTargetView.Get();
+		m_DeviceContext->OMSetRenderTargets(1, &rtv, nullptr);
+		m_DeviceContext->ClearRenderTargetView(rtv, clearColor);
+		ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+
+		m_SwapChain->Present(1, 0);
+	}
+
+	bool Renderer::CreateDeviceD3D(HWND hWnd)
+	{
+		DXGI_SWAP_CHAIN_DESC sd{};
+		sd.BufferCount = 2;
+		sd.BufferDesc.Width = 0;
+		sd.BufferDesc.Height = 0;
+		sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		sd.BufferDesc.RefreshRate.Numerator = 60;
+		sd.BufferDesc.RefreshRate.Denominator = 1;
+		sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+		sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+		sd.OutputWindow = hWnd;
+		sd.SampleDesc.Count = 1;
+		sd.SampleDesc.Quality = 0;
+		sd.Windowed = TRUE;
+		sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+
+		UINT createDeviceFlags = 0;
+		D3D_FEATURE_LEVEL featureLevel{};
+		const D3D_FEATURE_LEVEL featureLevelArray[2] = {
+		    D3D_FEATURE_LEVEL_11_0,
+		    D3D_FEATURE_LEVEL_10_0,
+		};
+
+		HRESULT res = D3D11CreateDeviceAndSwapChain(
+		    nullptr,
+		    D3D_DRIVER_TYPE_HARDWARE,
+		    nullptr,
+		    createDeviceFlags,
+		    featureLevelArray,
+		    2,
+		    D3D11_SDK_VERSION,
+		    &sd,
+		    &m_SwapChain,
+		    &m_Device,
+		    &featureLevel,
+		    &m_DeviceContext);
+
+		if (res == DXGI_ERROR_UNSUPPORTED)
+		{
+			res = D3D11CreateDeviceAndSwapChain(
+			    nullptr,
+			    D3D_DRIVER_TYPE_WARP,
+			    nullptr,
+			    createDeviceFlags,
+			    featureLevelArray,
+			    2,
+			    D3D11_SDK_VERSION,
+			    &sd,
+			    &m_SwapChain,
+			    &m_Device,
+			    &featureLevel,
+			    &m_DeviceContext);
+		}
+
+		if (FAILED(res))
+			return false;
+
+		CreateRenderTarget();
+		return true;
+	}
+
+	void Renderer::CleanupDeviceD3D()
+	{
+		CleanupRenderTarget();
+		m_SwapChain.Reset();
+		m_DeviceContext.Reset();
+		m_Device.Reset();
+	}
+
+	void Renderer::CreateRenderTarget()
+	{
+		ComPtr<ID3D11Texture2D> backBuffer{};
+		if (SUCCEEDED(m_SwapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer))) && backBuffer)
+		{
+			m_Device->CreateRenderTargetView(backBuffer.Get(), nullptr, &m_RenderTargetView);
+		}
+	}
+
+	void Renderer::CleanupRenderTarget()
+	{
+		m_RenderTargetView.Reset();
+	}
+
+	LRESULT CALLBACK Renderer::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+	{
+		if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
+			return true;
+
+		if (GetInstance().m_Initialized)
+		{
+			for (const auto& callback : GetInstance().m_WindowProcedureCallbacks)
+				callback(hWnd, msg, wParam, lParam);
+		}
+
+		switch (msg)
+		{
+		case WM_SIZE:
+			if (wParam == SIZE_MINIMIZED)
+				return 0;
+			GetInstance().m_ResizeWidth = LOWORD(lParam);
+			GetInstance().m_ResizeHeight = HIWORD(lParam);
+			return 0;
+		case WM_SYSCOMMAND:
+			if ((wParam & 0xfff0) == SC_KEYMENU)
+				return 0;
+			break;
+		case WM_DESTROY:
+			g_Running = false;
+			PostQuitMessage(0);
+			return 0;
+		}
+
+		return DefWindowProcW(hWnd, msg, wParam, lParam);
+	}
 }

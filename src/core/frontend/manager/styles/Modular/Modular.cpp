@@ -1,5 +1,4 @@
 #include <algorithm>
-#include "game/pointers/Pointers.hpp"
 #include "game/frontend/Menu.hpp"
 #include "core/frontend/manager/UIManager.hpp"
 
@@ -96,7 +95,7 @@ namespace YimMenu
 
 		if (UIManager::ShowingContentWindow() && activeSubmenu)
 		{
-			ImVec2 defaultSize(*Pointers.ScreenResX / 2.8f, *Pointers.ScreenResY / 2.5f);
+			ImVec2 defaultSize(std::max(500.0f, io.DisplaySize.x * 0.6f), std::max(340.0f, io.DisplaySize.y * 0.6f));
 			ImGui::SetNextWindowSize(defaultSize, ImGuiCond_FirstUseEver);
 
 			if (ImGui::Begin("##OptionsContentWindow", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar))

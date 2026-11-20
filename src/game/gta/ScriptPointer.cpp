@@ -1,10 +1,8 @@
 #include "ScriptPointer.hpp"
-#include "game/gta/Scripts.hpp"
-#include "types/script/scrProgram.hpp"
 
 namespace YimMenu
 {
-	static std::uint32_t ReadThreeByte(std::uint8_t* arr)
+	static std::uint32_t ReadThreeByte(const std::uint8_t* arr)
 	{
 		return arr[0] + (arr[1] << 8) + (arr[2] << 16);
 	}
@@ -20,12 +18,12 @@ namespace YimMenu
 
 	ScriptPointer ScriptPointer::Add(std::uint32_t offset)
 	{
-		return ScriptPointer(m_Name, m_Pattern, m_Offset + offset, m_Rip, m_Address);
+		return ScriptPointer(m_Name, m_Pattern, m_Offset + static_cast<std::int32_t>(offset), m_Rip, m_Address);
 	}
 
 	ScriptPointer ScriptPointer::Sub(std::uint32_t offset)
 	{
-		return ScriptPointer(m_Name, m_Pattern, m_Offset - offset, m_Rip, m_Address);
+		return ScriptPointer(m_Name, m_Pattern, m_Offset - static_cast<std::int32_t>(offset), m_Rip, m_Address);
 	}
 
 	ScriptPointer ScriptPointer::Rip()
@@ -33,35 +31,27 @@ namespace YimMenu
 		return ScriptPointer(m_Name, m_Pattern, m_Offset, true, m_Address);
 	}
 
-	ScriptPointer ScriptPointer::Scan(rage::scrProgram* program)
-	{
-		if (auto location = Scripts::GetCodeLocationByPattern(program, m_Pattern))
-		{
-			m_Address = location.value() + m_Offset;
-			if (m_Rip)
-				m_Address = ReadThreeByte(program->GetCodeAddress(m_Address));
-
-			LOG(INFO) << "Found pattern for " << m_Name << " at " << HEX(m_Address) << " in script " << program->m_Name;
-			return ScriptPointer(m_Name, m_Pattern, m_Offset, m_Rip, m_Address);
-		}
-
-		LOG(FATAL) << "Failed to find pattern for " << m_Name;
-		return ScriptPointer(m_Name, m_Pattern, m_Offset, m_Rip, 0);
-	}
-
 	ScriptPointer ScriptPointer::Scan(ScriptData* data)
 	{
 		if (auto location = ScriptData::GetCodeLocationByPattern(data, m_Pattern))
 		{
-			m_Address = location.value() + m_Offset;
+			m_Address = static_cast<std::uint32_t>(static_cast<std::int64_t>(location.value()) + m_Offset);
 			if (m_Rip)
-				m_Address = ReadThreeByte(ScriptData::GetCodeLocation(data, m_Address));
+			{
+				if (const auto* ptr = data->GetCodeLocation(m_Address))
+					m_Address = ReadThreeByte(ptr);
+				else
+					m_Address = 0;
+			}
 
-			LOG(INFO) << "Found pattern for " << m_Name << " at " << HEX(m_Address) << " in script " << data->GetName();
-			return ScriptPointer(m_Name, m_Pattern, m_Offset, m_Rip, m_Address);
+			if (m_Address)
+			{
+				LOG(INFO) << "Found pattern for " << m_Name << " at " << HEX(m_Address) << " in script " << data->GetName();
+				return ScriptPointer(m_Name, m_Pattern, m_Offset, m_Rip, m_Address);
+			}
 		}
 
-		LOG(FATAL) << "Failed to find pattern for " << m_Name;
+		LOG(WARNING) << "Failed to find pattern for " << m_Name;
 		return ScriptPointer(m_Name, m_Pattern, m_Offset, m_Rip, 0);
 	}
 }

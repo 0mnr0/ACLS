@@ -1,7 +1,6 @@
 #include "PatternScanner.hpp"
 
 #include "Module.hpp"
-#include "ModuleMgr.hpp"
 #include "core/backend/PatternCache.hpp"
 
 #include <future>
@@ -19,29 +18,40 @@ namespace YimMenu
 		if (!m_Module || !m_Module->Valid())
 			return false;
 
-		bool scanSuccess = true;
-
-		if (!ModuleMgr.IsManualMapped())
+		// Check if every pattern is already in PatternCache before dumping the full remote module
+		bool needsMemoryDump = false;
+		for (const auto& [pattern, func] : m_Patterns)
 		{
-			std::vector<std::future<bool>> jobs;
-			for (const auto& [pattern, func] : m_Patterns)
+			if (!PatternCache::IsInitialized() || !PatternCache::GetCachedOffset(pattern->Hash().Update(m_Module->Size())).has_value())
 			{
-				jobs.emplace_back(std::async(&PatternScanner::ScanInternal, this, pattern, func));
-			}
-
-			for (auto& job : jobs)
-			{
-				job.wait();
-
-				if (scanSuccess)
-					scanSuccess = job.get();
+				needsMemoryDump = true;
+				break;
 			}
 		}
-		else
+
+		if (needsMemoryDump)
 		{
-			// spawning threads seems to throw STATUS_THREADPOOL_FREE_LIBRARY_ON_COMPLETION_FAILED when manual mapping
-			for (const auto& [pattern, func] : m_Patterns)
-				scanSuccess = scanSuccess && PatternScanner::ScanInternal(pattern, func);
+			auto* mutableMod = const_cast<Module*>(m_Module);
+			if (!mutableMod->CacheImage())
+			{
+				LOG(WARNING) << "Failed to cache remote image for " << m_Module->Name();
+				return false;
+			}
+		}
+
+		bool scanSuccess = true;
+		std::vector<std::future<bool>> jobs;
+		jobs.reserve(m_Patterns.size());
+
+		for (const auto& [pattern, func] : m_Patterns)
+		{
+			jobs.emplace_back(std::async(std::launch::async, &PatternScanner::ScanInternal, this, pattern, func));
+		}
+
+		for (auto& job : jobs)
+		{
+			const bool ok = job.get();
+			scanSuccess = scanSuccess && ok;
 		}
 
 		return scanSuccess;
@@ -56,36 +66,43 @@ namespace YimMenu
 			auto offset = PatternCache::GetCachedOffset(pattern->Hash().Update(m_Module->Size()));
 			if (offset.has_value())
 			{
-				LOGF(INFO, "Using cached pattern [{}] : [{:X}] [Hash(): {:X}]", pattern->Name(), m_Module->Base() + offset.value(), pattern->Hash().Update(m_Module->Size()).m_Hash);
-				std::invoke(func, m_Module->Base() + offset.value());
+				const std::uintptr_t resolved = m_Module->Base() + offset.value();
+				LOGF(INFO, "Using cached pattern [{}] : [{:X}] [Hash(): {:X}]", pattern->Name(), resolved, pattern->Hash().Update(m_Module->Size()).m_Hash);
+				std::invoke(func, PointerCalculator(resolved));
 				return true;
 			}
 		}
 
-		for (auto i = m_Module->Base(); i < m_Module->End(); ++i)
+		const auto& image = m_Module->GetCachedImage();
+		if (image.size() < signature.size())
 		{
-			if (signature.size() + i > m_Module->End())
-				break;
+			LOG(WARNING) << "Failed to scan pattern [" << pattern->Name() << "]: module image cache unavailable";
+			return false;
+		}
 
-			const auto instruction = reinterpret_cast<std::uint8_t*>(i);
+		const std::size_t limit = image.size() - signature.size();
+		for (std::size_t offset = 0; offset <= limit; ++offset)
+		{
 			bool found = true;
-			for (std::size_t instructionIdx = 0; instructionIdx < signature.size(); ++instructionIdx)
+			for (std::size_t idx = 0; idx < signature.size(); ++idx)
 			{
-				if (signature[instructionIdx] && signature[instructionIdx].value() != instruction[instructionIdx])
+				if (signature[idx] && signature[idx].value() != image[offset + idx])
 				{
 					found = false;
+					break;
 				}
 			}
 
 			if (found)
 			{
-				LOG(INFO) << "Found pattern [" << pattern->Name() << "] : [" << HEX(i) << "]";
+				const std::uintptr_t remoteAddr = m_Module->Base() + offset;
+				LOG(INFO) << "Found pattern [" << pattern->Name() << "] : [" << HEX(remoteAddr) << "]";
 
-				std::invoke(func, i);
+				std::invoke(func, PointerCalculator(remoteAddr));
 
 				if (PatternCache::IsInitialized())
 				{
-					PatternCache::UpdateCachedOffset(pattern->Hash().Update(m_Module->Size()), i - m_Module->Base());
+					PatternCache::UpdateCachedOffset(pattern->Hash().Update(m_Module->Size()), static_cast<int>(offset));
 				}
 
 				return true;
