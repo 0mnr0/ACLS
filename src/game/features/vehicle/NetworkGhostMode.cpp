@@ -7,6 +7,7 @@
 #include "game/pointers/Pointers.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 // ---------------------------------------------------------------------------
@@ -58,6 +59,33 @@ namespace YimMenu::Features
 		std::uint8_t   m_OrigPedAlpha{0xFF};
 		bool           m_OrigVehicleAlphaValid{false};
 		bool           m_OrigPedAlphaValid{false};
+
+		// Stability gate: a freshly created ped/vehicle (session change, respawn, new car) is not
+		// written to until the same entity + netObject pair has been seen continuously for a while.
+		using Clock = std::chrono::steady_clock;
+		std::uintptr_t    m_SeenPed{0};
+		std::uintptr_t    m_SeenVeh{0};
+		Clock::time_point m_PedSince{};
+		Clock::time_point m_VehSince{};
+		static constexpr std::chrono::milliseconds k_StableDelay{2000};
+
+		bool IsStable(std::uintptr_t entity, std::uintptr_t& seen, Clock::time_point& since)
+		{
+			const auto now = Clock::now();
+			std::uintptr_t key = 0;
+			if (entity)
+			{
+				const auto net = g_Memory->Read<std::uintptr_t>(entity + k_NetObjectOffset).value_or(0);
+				key = entity ^ (net << 1);
+			}
+			if (!key || key != seen)
+			{
+				seen = key;
+				since = now;
+				return false;
+			}
+			return now - since >= k_StableDelay;
+		}
 
 		bool           m_AlphaWritten{false}; // we have written alpha to ped/vehicle and must restore it
 
@@ -361,8 +389,18 @@ namespace YimMenu::Features
 			// Only act on entities that are provably alive right now.
 			const auto pedRaw = Self::GetPedPtr();
 			const auto vehRaw = Self::GetVehiclePtr();
-			const auto pedPtr = IsLiveEntity(pedRaw) ? pedRaw : 0;
-			const auto vehPtr = IsLiveEntity(vehRaw) ? vehRaw : 0;
+			// Do nothing while no session is running or while the entities are not stable yet.
+			if (Pointers.IsSessionStarted && !g_Memory->Read<bool>(Pointers.IsSessionStarted).value_or(false))
+			{
+				m_SeenPed = m_SeenVeh = 0;
+				return;
+			}
+			const bool pedOk = IsLiveEntity(pedRaw) && IsStable(pedRaw, m_SeenPed, m_PedSince);
+			const bool vehOk = IsLiveEntity(vehRaw) && IsStable(vehRaw, m_SeenVeh, m_VehSince);
+			if (!IsLiveEntity(vehRaw))
+				m_SeenVeh = 0;
+			const auto pedPtr = pedOk ? pedRaw : 0;
+			const auto vehPtr = vehOk ? vehRaw : 0;
 
 			// --- Vehicle: physics ghost flags + visual alpha ---
 			if (vehPtr != m_LastVehiclePointer)
