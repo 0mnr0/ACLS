@@ -31,17 +31,19 @@
 
 namespace YimMenu::Features
 {
+	/*
 	static IntCommand _NetworkGhostAlpha{"networkghostalpha", "Network Ghost Alpha",
 	    "Alpha transparency in network ghost mode (0 = invisible, 255 = opaque)", 0, 255, 128};
 
 	static BoolCommand _NetworkGhostModifyAlpha{"networkghostmodifyalpha", "Modify Alpha",
 	    "Also write entity alpha (the game fights this every frame, which can cause flickering)", false};
+	*/
 
 	static constexpr std::ptrdiff_t k_NetObjectOffset  = 0x00D0; // CDynamicEntity::m_NetObject
 	static constexpr std::ptrdiff_t k_NetBackPtrOffset = 0x0050; // netObject::m_GameObject (points back to the entity)
 	static constexpr std::ptrdiff_t k_NetTypeOffset    = 0x0008; // netObject::m_ObjectType
 	static constexpr std::ptrdiff_t k_NetGhostFlagOff  = 0x01C5; // netObject ghost/collision flag byte
-	static constexpr std::ptrdiff_t k_AlphaOffset      = 0x00AC; // entity alpha
+	// static constexpr std::ptrdiff_t k_AlphaOffset      = 0x00AC; // entity alpha
 	static constexpr std::uint8_t   k_NetGhostBits     = 0x44;
 	static constexpr std::uint16_t  k_TypeAutomobile   = 0;
 	static constexpr std::uint16_t  k_TypePlayer       = 11;
@@ -59,8 +61,8 @@ namespace YimMenu::Features
 			std::uintptr_t    net{0};        // its netObject
 			std::uintptr_t    seenKey{0};    // stability tracking
 			Clock::time_point seenSince{};
-			std::uint8_t      origAlpha{0xFF};
-			bool              alphaWritten{false};
+			// std::uint8_t      origAlpha{0xFF};
+			// bool              alphaWritten{false};
 		};
 
 		Tracked m_Ped;
@@ -127,12 +129,12 @@ namespace YimMenu::Features
 			if (t.entity && g_Memory && IsLiveEntity(t.entity) && GetNetObject(t.entity) == t.net)
 			{
 				ModifyByte(t.net + k_NetGhostFlagOff, 0, k_NetGhostBits);
-				if (t.alphaWritten)
-					g_Memory->Write<std::uint8_t>(t.entity + k_AlphaOffset, t.origAlpha);
+				// if (t.alphaWritten)
+				// 	g_Memory->Write<std::uint8_t>(t.entity + k_AlphaOffset, t.origAlpha);
 			}
 			t.entity = 0;
 			t.net = 0;
-			t.alphaWritten = false;
+			// t.alphaWritten = false;
 		}
 
 		void Apply(std::uintptr_t entity, Tracked& t)
@@ -150,6 +152,7 @@ namespace YimMenu::Features
 
 			ModifyByte(net + k_NetGhostFlagOff, k_NetGhostBits, 0);
 
+			/*
 			if (_NetworkGhostModifyAlpha.GetState())
 			{
 				if (!t.alphaWritten)
@@ -168,6 +171,7 @@ namespace YimMenu::Features
 				g_Memory->Write<std::uint8_t>(entity + k_AlphaOffset, t.origAlpha);
 				t.alphaWritten = false;
 			}
+			*/
 		}
 
 		void Handle(std::uintptr_t entity, Tracked& t)

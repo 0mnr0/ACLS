@@ -15,10 +15,10 @@ namespace YimMenu::Submenus
 
 		// --- Network Ghost Mode (netObject ghost flag) ---
 		globals->AddItem(std::make_shared<BoolCommandItem>("networkghostmode"_J, "Network Ghost Mode"));
-		globals->AddItem(std::make_shared<ConditionalItem>("networkghostmode"_J,
-		    std::make_shared<BoolCommandItem>("networkghostmodifyalpha"_J, "Modify Alpha")));
-		globals->AddItem(std::make_shared<ConditionalItem>("networkghostmodifyalpha"_J,
-		    std::make_shared<IntCommandItem>("networkghostalpha"_J, "Alpha")));
+		// globals->AddItem(std::make_shared<ConditionalItem>("networkghostmode"_J,
+		//     std::make_shared<BoolCommandItem>("networkghostmodifyalpha"_J, "Modify Alpha")));
+		// globals->AddItem(std::make_shared<ConditionalItem>("networkghostmodifyalpha"_J,
+		//     std::make_shared<IntCommandItem>("networkghostalpha"_J, "Alpha")));
 
 		main->AddItem(globals);
 		AddCategory(std::move(main));
