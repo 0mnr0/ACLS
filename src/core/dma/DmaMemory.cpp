@@ -1,43 +1,6 @@
 #include "DmaMemory.hpp"
 #include "common.hpp"
 #include <sstream>
-#include <chrono>
-#include <cstdio>
-#include <mutex>
-
-namespace
-{
-	// Append-only, flushed on every line so the log survives a game/menu crash.
-	// File: dma_writes.log in the working directory. Format: local time, kind, address, size, first bytes, result.
-	void LogDmaWrite(const char* kind, std::uintptr_t address, std::size_t size, const void* data, int result)
-	{
-		static std::mutex s_Mutex;
-		static std::FILE* s_File = std::fopen("dma_writes.log", "ab");
-		if (!s_File)
-			return;
-
-		using namespace std::chrono;
-		const auto now = system_clock::now();
-		const auto ms = duration_cast<milliseconds>(now.time_since_epoch()).count() % 1000;
-		const std::time_t tt = system_clock::to_time_t(now);
-		std::tm tmv{};
-		localtime_s(&tmv, &tt);
-
-		char bytes[3 * 8 + 1]{};
-		if (data)
-		{
-			const auto* p = static_cast<const unsigned char*>(data);
-			for (std::size_t i = 0; i < size && i < 8; ++i)
-				std::snprintf(bytes + i * 3, 4, "%02X ", p[i]);
-		}
-
-		std::lock_guard lock(s_Mutex);
-		std::fprintf(s_File, "[%04d-%02d-%02d %02d:%02d:%02d.%03d] %-8s addr=0x%llX size=%zu data=%s res=%d\n",
-		    tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_hour, tmv.tm_min, tmv.tm_sec, static_cast<int>(ms),
-		    kind, static_cast<unsigned long long>(address), size, bytes, result);
-		std::fflush(s_File);
-	}
-}
 
 namespace YimMenu
 {
@@ -78,9 +41,7 @@ namespace YimMenu
 		if (!IMemory::IsValidUserAddress(address))
 			return false;
 
-		const bool ok = m_Api.ScatterPrepareWrite(m_Handle, static_cast<Vmm::QWORD>(address), const_cast<PBYTE>(static_cast<const BYTE*>(data)), static_cast<DWORD>(size)) != FALSE;
-		LogDmaWrite("scatter", address, size, data, ok);
-		return ok;
+		return m_Api.ScatterPrepareWrite(m_Handle, static_cast<Vmm::QWORD>(address), const_cast<PBYTE>(static_cast<const BYTE*>(data)), static_cast<DWORD>(size)) != FALSE;
 	}
 
 	bool DmaScatterHandle::Execute()
@@ -88,9 +49,7 @@ namespace YimMenu
 		if (!m_Handle || !m_Api.ScatterExecute)
 			return false;
 
-		const bool ok = m_Api.ScatterExecute(m_Handle) != FALSE;
-		LogDmaWrite("execute", 0, 0, nullptr, ok);
-		return ok;
+		return m_Api.ScatterExecute(m_Handle) != FALSE;
 	}
 
 	bool DmaScatterHandle::Clear()
@@ -254,9 +213,7 @@ namespace YimMenu
 		if (!m_Vmm || !m_Pid || !buffer || size == 0)
 			return false;
 
-		const bool ok = m_Api.MemWrite(m_Vmm, m_Pid, static_cast<ULONG64>(address), const_cast<PBYTE>(static_cast<const BYTE*>(buffer)), static_cast<DWORD>(size)) != FALSE;
-		LogDmaWrite("write", address, size, buffer, ok);
-		return ok;
+		return m_Api.MemWrite(m_Vmm, m_Pid, static_cast<ULONG64>(address), const_cast<PBYTE>(static_cast<const BYTE*>(buffer)), static_cast<DWORD>(size)) != FALSE;
 	}
 
 	bool DmaMemory::GetModule(std::string_view moduleName, RemoteModuleInfo& outInfo)
