@@ -16,7 +16,8 @@ file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS
     "${SRC_DIR}/**.cpp"    
 )
 
-add_executable(${PROJECT_NAME} ${SRC_FILES})
+add_executable(${PROJECT_NAME} ${SRC_FILES}
+        src/game/features/world/ExtendedCamera.cpp)
 set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
 
 target_precompile_headers(${PROJECT_NAME} PUBLIC "${SRC_DIR}/common.hpp")

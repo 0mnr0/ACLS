@@ -42,5 +42,6 @@ namespace YimMenu
 			}
 		}
 		ImGui::EndGroup();
+		ImGui::Spacing();
 	}
 }

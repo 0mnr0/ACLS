@@ -3,7 +3,9 @@
 #include "game/frontend/Menu.hpp"
 #include <backends/imgui_impl_dx11.h>
 #include <backends/imgui_impl_win32.h>
+#include <dwmapi.h>
 #include <imgui.h>
+#include <windowsx.h>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -53,6 +55,16 @@ namespace YimMenu
 			LOG(FATAL) << "Failed to create application window.";
 			return false;
 		}
+
+		constexpr MARGINS shadowMargins{0, 0, 0, 1};
+		DwmExtendFrameIntoClientArea(m_Window, &shadowMargins);
+
+		BOOL darkMode = TRUE;
+		DwmSetWindowAttribute(m_Window, 20, &darkMode, sizeof(darkMode));
+		DWORD cornerPreference = 2; // DWMWCP_ROUND on Windows 11
+		DwmSetWindowAttribute(m_Window, 33, &cornerPreference, sizeof(cornerPreference));
+
+		SetWindowPos(m_Window, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 
 		if (!CreateDeviceD3D(m_Window))
 		{
@@ -132,23 +144,30 @@ namespace YimMenu
 		if (!g_Running)
 			return false;
 
-		if (m_ResizeWidth != 0 && m_ResizeHeight != 0)
-		{
-			CleanupRenderTarget();
-			m_SwapChain->ResizeBuffers(0, m_ResizeWidth, m_ResizeHeight, DXGI_FORMAT_UNKNOWN, 0);
-			m_ResizeWidth = 0;
-			m_ResizeHeight = 0;
-			CreateRenderTarget();
-		}
+		HandleResize();
 
 		Render();
 		return true;
 	}
 
+	void Renderer::HandleResize()
+	{
+		if (m_ResizeWidth == 0 || m_ResizeHeight == 0 || !m_SwapChain)
+			return;
+
+		CleanupRenderTarget();
+		m_SwapChain->ResizeBuffers(0, m_ResizeWidth, m_ResizeHeight, DXGI_FORMAT_UNKNOWN, 0);
+		m_ResizeWidth = 0;
+		m_ResizeHeight = 0;
+		CreateRenderTarget();
+	}
+
 	void Renderer::Render()
 	{
-		if (!m_SafeToRender || !m_RenderTargetView)
+		if (!m_SafeToRender || !m_RenderTargetView || m_IsRendering)
 			return;
+
+		m_IsRendering = true;
 
 		if (m_FontsUpdated)
 		{
@@ -166,13 +185,14 @@ namespace YimMenu
 
 		ImGui::Render();
 
-		constexpr float clearColor[4] = {0.07f, 0.07f, 0.09f, 1.0f};
+		constexpr float clearColor[4] = {0.059f, 0.059f, 0.059f, 1.0f};
 		ID3D11RenderTargetView* rtv = m_RenderTargetView.Get();
 		m_DeviceContext->OMSetRenderTargets(1, &rtv, nullptr);
 		m_DeviceContext->ClearRenderTargetView(rtv, clearColor);
 		ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
 		m_SwapChain->Present(1, 0);
+		m_IsRendering = false;
 	}
 
 	bool Renderer::CreateDeviceD3D(HWND hWnd)
@@ -272,11 +292,90 @@ namespace YimMenu
 
 		switch (msg)
 		{
+		case WM_NCCALCSIZE:
+			if (wParam == TRUE)
+			{
+				auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(lParam);
+				if (IsZoomed(hWnd))
+				{
+					HMONITOR monitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+					MONITORINFO mi{sizeof(MONITORINFO)};
+					if (GetMonitorInfoW(monitor, &mi))
+						params->rgrc[0] = mi.rcWork;
+				}
+				return 0;
+			}
+			break;
+		case WM_GETMINMAXINFO:
+		{
+			auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
+			mmi->ptMinTrackSize.x = 640;
+			mmi->ptMinTrackSize.y = 440;
+			return 0;
+		}
+		case WM_ERASEBKGND:
+			return 1;
+		case WM_NCHITTEST:
+		{
+			POINT pt{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+			RECT winRect{};
+			GetWindowRect(hWnd, &winRect);
+
+			if (!IsZoomed(hWnd))
+			{
+				constexpr int borderWidth = 5;
+				const bool left = pt.x < winRect.left + borderWidth;
+				const bool right = pt.x >= winRect.right - borderWidth;
+				const bool top = pt.y < winRect.top + borderWidth;
+				const bool bottom = pt.y >= winRect.bottom - borderWidth;
+
+				if (top && left)
+					return HTTOPLEFT;
+				if (top && right)
+					return HTTOPRIGHT;
+				if (bottom && left)
+					return HTBOTTOMLEFT;
+				if (bottom && right)
+					return HTBOTTOMRIGHT;
+				if (left)
+					return HTLEFT;
+				if (right)
+					return HTRIGHT;
+				if (top)
+					return HTTOP;
+				if (bottom)
+					return HTBOTTOM;
+			}
+
+			POINT clientPt = pt;
+			ScreenToClient(hWnd, &clientPt);
+			RECT clientRect{};
+			GetClientRect(hWnd, &clientRect);
+			const int clientWidth = clientRect.right - clientRect.left;
+
+			auto& inst = GetInstance();
+			if (clientPt.y >= 0
+			    && clientPt.y < static_cast<LONG>(inst.m_TitleBarHeight)
+			    && clientPt.x >= 0
+			    && clientPt.x < clientWidth - static_cast<LONG>(inst.m_TitleBarControlsWidth)
+			    && !inst.m_TitleBarItemHovered)
+			{
+				return HTCAPTION;
+			}
+
+			return HTCLIENT;
+		}
 		case WM_SIZE:
 			if (wParam == SIZE_MINIMIZED)
 				return 0;
 			GetInstance().m_ResizeWidth = LOWORD(lParam);
 			GetInstance().m_ResizeHeight = HIWORD(lParam);
+			if (GetInstance().m_Initialized && GetInstance().m_SafeToRender && !GetInstance().m_IsRendering
+			    && GetInstance().m_ResizeWidth > 0 && GetInstance().m_ResizeHeight > 0)
+			{
+				GetInstance().HandleResize();
+				GetInstance().Render();
+			}
 			return 0;
 		case WM_SYSCOMMAND:
 			if ((wParam & 0xfff0) == SC_KEYMENU)

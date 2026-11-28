@@ -56,6 +56,38 @@ namespace YimMenu
 			return GetInstance().m_Window;
 		}
 
+		static void SetTitleBarInfo(float height, float controlsWidth, bool itemHovered)
+		{
+			auto& inst = GetInstance();
+			inst.m_TitleBarHeight = height;
+			inst.m_TitleBarControlsWidth = controlsWidth;
+			inst.m_TitleBarItemHovered = itemHovered;
+		}
+
+		static void MinimizeWindow()
+		{
+			if (auto hwnd = GetInstance().m_Window)
+				ShowWindow(hwnd, SW_MINIMIZE);
+		}
+
+		static void ToggleMaximizeWindow()
+		{
+			if (auto hwnd = GetInstance().m_Window)
+				ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+		}
+
+		static void CloseWindow()
+		{
+			if (auto hwnd = GetInstance().m_Window)
+				PostMessageW(hwnd, WM_CLOSE, 0, 0);
+		}
+
+		static bool IsWindowMaximized()
+		{
+			auto hwnd = GetInstance().m_Window;
+			return hwnd && IsZoomed(hwnd);
+		}
+
 	private:
 		template<typename T>
 		using ComPtr = Microsoft::WRL::ComPtr<T>;
@@ -70,6 +102,7 @@ namespace YimMenu
 		void DestroyImpl();
 		bool TickImpl();
 		void Render();
+		void HandleResize();
 
 		bool CreateDeviceD3D(HWND hWnd);
 		void CleanupDeviceD3D();
@@ -81,10 +114,14 @@ namespace YimMenu
 		bool m_Initialized = false;
 		bool m_SafeToRender = false;
 		bool m_FontsUpdated = false;
+		bool m_IsRendering = false;
 		HWND m_Window = nullptr;
 		WNDCLASSEXW m_WindowClass{};
 		UINT m_ResizeWidth = 0;
 		UINT m_ResizeHeight = 0;
+		float m_TitleBarHeight = 38.0f;
+		float m_TitleBarControlsWidth = 138.0f;
+		bool m_TitleBarItemHovered = false;
 
 		ComPtr<ID3D11Device> m_Device{};
 		ComPtr<ID3D11DeviceContext> m_DeviceContext{};

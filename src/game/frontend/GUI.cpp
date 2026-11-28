@@ -18,7 +18,7 @@ namespace YimMenu
 		    [&] {
 			    Notifications::Draw();
 		    },
-		    -2);
+		    10);
 
 		Renderer::SetSafeToRender();
 	}

@@ -63,12 +63,12 @@ namespace YimMenu
 
 	static void DrawNotification(Notification& notification, int position)
 	{
-		float y_pos = position * 100;
-		float x_pos = 10;
+		float y_pos = 48.0f + position * 110.0f;
+		float x_pos = 10.0f;
 		ImVec2 cardSize(m_CardSizeX, m_CardSizeY);
 
 		ImGui::SetNextWindowSize(cardSize, ImGuiCond_Always);
-		ImGui::SetNextWindowPos(ImVec2(x_pos + notification.m_AnimationOffset, y_pos + 10), ImGuiCond_Always);
+		ImGui::SetNextWindowPos(ImVec2(x_pos + notification.m_AnimationOffset, y_pos), ImGuiCond_Always);
 
 		std::string windowTitle = std::to_string(position);
 		ImGui::Begin(windowTitle.c_str(), nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoFocusOnAppearing);

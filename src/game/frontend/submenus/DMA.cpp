@@ -13,9 +13,9 @@ namespace YimMenu::Submenus
 	    Submenu::Submenu("DMA", ICON_FA_SERVER)
 	{
 		auto connection = std::make_shared<Category>("Connection");
-		auto statusGroup = std::make_shared<Group>("Status", 1);
-		auto settingsGroup = std::make_shared<Group>("Settings", 1);
-		auto offsetsGroup = std::make_shared<Group>("Offsets", 1);
+		auto statusGroup = std::make_shared<Group>("Status", -1);
+		auto settingsGroup = std::make_shared<Group>("Settings", -1);
+		auto offsetsGroup = std::make_shared<Group>("Offsets", -1);
 
 		statusGroup->AddItem(std::make_shared<ImGuiItem>([] {
 			const auto state = DmaSession::GetState();

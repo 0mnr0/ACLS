@@ -52,7 +52,7 @@ namespace YimMenu
 		{
 		case UITheme::Classic:
 			RenderClassicTheme();
-			break;
+			return;
 		case UITheme::Modern:
 			RenderModernTheme();
 			break;
@@ -64,8 +64,11 @@ namespace YimMenu
 			break;
 		default:
 			RenderClassicTheme(); // Default theme
-			break;
+			return;
 		}
+
+		// Keep custom top bar available for non-Classic themes
+		DrawCustomTitleBarWindow(38.0f);
 	}
 
 	std::shared_ptr<Submenu> UIManager::GetActiveSubmenuImpl()

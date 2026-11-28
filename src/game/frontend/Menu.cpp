@@ -19,18 +19,19 @@ namespace YimMenu
 		Renderer::AddRendererCallback(
 		    [&] {
 			    ProcessOnboarding();
-			    if (!GUI::IsOpen())
-				    return;
 
 			    ImGui::PushFont(Menu::Font::g_DefaultFont);
 			    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImU32(ImColor(15, 15, 15)));
 
-			    UIManager::Draw();
+			    if (GUI::IsOpen())
+				    UIManager::Draw();
+			    else
+				    DrawCustomTitleBarWindow(38.0f);
 
 			    ImGui::PopStyleColor();
 			    ImGui::PopFont();
 		    },
-		    -1);
+		    0);
 	}
 
 	static const ImWchar* GetGlyphRangesCyrillicOnly()

@@ -10,6 +10,8 @@ namespace YimMenu
 	extern void RenderModernTheme();
 	extern void RenderModernVTheme();
 	extern void RenderModularTheme();
+	extern void DrawCustomTitleBar(float height = 38.0f);
+	extern void DrawCustomTitleBarWindow(float height = 38.0f);
 	extern void SetupStyle();
 	extern void DefaultStyle();
 }

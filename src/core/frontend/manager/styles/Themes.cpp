@@ -1,8 +1,160 @@
 #include "Themes.hpp"
 #include "core/commands/ColorCommand.hpp"
+#include "core/renderer/Renderer.hpp"
+#include "game/backend/DmaSession.hpp"
 
 namespace YimMenu
 {
+	void DrawCustomTitleBar(float height)
+	{
+		ImDrawList* drawList = ImGui::GetWindowDrawList();
+		const ImVec2 winPos = ImGui::GetWindowPos();
+		const float winWidth = ImGui::GetWindowWidth();
+		const ImVec2 barMin = winPos;
+		const ImVec2 barMax(winPos.x + winWidth, winPos.y + height);
+
+		// Top bar background and bottom separator
+		drawList->AddRectFilled(barMin, barMax, IM_COL32(18, 19, 23, 255));
+		drawList->AddLine(ImVec2(barMin.x, barMax.y - 1.0f), ImVec2(barMax.x, barMax.y - 1.0f), IM_COL32(45, 48, 56, 255), 1.0f);
+
+		// Left branding & DMA status
+		const float centerY = barMin.y + height * 0.5f;
+		float cursorX = barMin.x + 14.0f;
+
+		drawList->AddRectFilled(ImVec2(cursorX, centerY - 6.0f), ImVec2(cursorX + 3.0f, centerY + 6.0f), IM_COL32(92, 217, 143, 255), 1.5f);
+		cursorX += 11.0f;
+
+		const char* title = "SafeYimV2";
+		const ImVec2 titleSize = ImGui::CalcTextSize(title);
+		drawList->AddText(ImVec2(cursorX, centerY - titleSize.y * 0.5f), IM_COL32(236, 239, 244, 255), title);
+		cursorX += titleSize.x + 8.0f;
+
+		const char* badge = "DMA";
+		const ImVec2 badgeSize = ImGui::CalcTextSize(badge);
+		const ImVec2 badgeMin(cursorX, centerY - badgeSize.y * 0.5f - 2.0f);
+		const ImVec2 badgeMax(cursorX + badgeSize.x + 10.0f, centerY + badgeSize.y * 0.5f + 2.0f);
+		drawList->AddRectFilled(badgeMin, badgeMax, IM_COL32(42, 82, 52, 180), 4.0f);
+		drawList->AddRect(badgeMin, badgeMax, IM_COL32(92, 217, 143, 140), 4.0f);
+		drawList->AddText(ImVec2(badgeMin.x + 5.0f, centerY - badgeSize.y * 0.5f), IM_COL32(130, 230, 165, 255), badge);
+		cursorX = badgeMax.x + 14.0f;
+
+		ImU32 statusDotColor = IM_COL32(130, 134, 142, 255);
+		const char* statusText = "Disconnected";
+		switch (DmaSession::GetState())
+		{
+		case DmaState::Connected:
+			statusDotColor = IM_COL32(76, 217, 102, 255);
+			statusText = "Connected";
+			break;
+		case DmaState::Connecting:
+			statusDotColor = IM_COL32(242, 191, 51, 255);
+			statusText = "Connecting...";
+			break;
+		case DmaState::Error:
+			statusDotColor = IM_COL32(242, 89, 89, 255);
+			statusText = "Error";
+			break;
+		case DmaState::Disconnected:
+		default:
+			break;
+		}
+
+		drawList->AddCircleFilled(ImVec2(cursorX + 4.0f, centerY), 3.5f, statusDotColor);
+		cursorX += 13.0f;
+		const ImVec2 statusSize = ImGui::CalcTextSize(statusText);
+		drawList->AddText(ImVec2(cursorX, centerY - statusSize.y * 0.5f), IM_COL32(165, 170, 180, 255), statusText);
+
+		// Right-side window control buttons (Minimize, Maximize/Restore, Close)
+		constexpr float buttonWidth = 46.0f;
+		constexpr float buttonsWidth = buttonWidth * 3.0f;
+		const float buttonsStartX = barMax.x - buttonsWidth;
+		bool anyButtonHovered = false;
+
+		auto drawControlButton = [&](const char* id, int index, bool isClose, auto&& drawGlyph, auto&& onClick) {
+			const ImVec2 btnMin(buttonsStartX + index * buttonWidth, barMin.y);
+			const ImVec2 btnMax(btnMin.x + buttonWidth, barMax.y - 1.0f);
+			const ImVec2 btnCenter((btnMin.x + btnMax.x) * 0.5f, (btnMin.y + btnMax.y) * 0.5f);
+
+			ImGui::SetCursorScreenPos(btnMin);
+			ImGui::InvisibleButton(id, ImVec2(buttonWidth, height - 1.0f));
+
+			const bool hovered = ImGui::IsItemHovered();
+			const bool active = ImGui::IsItemActive();
+			anyButtonHovered |= hovered;
+
+			if (hovered || active)
+			{
+				ImU32 bgCol = isClose
+				    ? (active ? IM_COL32(168, 35, 22, 255) : IM_COL32(196, 43, 28, 255))
+				    : (active ? IM_COL32(255, 255, 255, 36) : IM_COL32(255, 255, 255, 22));
+				drawList->AddRectFilled(btnMin, btnMax, bgCol);
+			}
+
+			const ImU32 iconCol = (isClose && hovered) ? IM_COL32(255, 255, 255, 255) : IM_COL32(215, 218, 224, 255);
+			drawGlyph(btnCenter, iconCol);
+
+			if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+				onClick();
+		};
+
+		drawControlButton(
+		    "##TitleBarMinimize",
+		    0,
+		    false,
+		    [&](const ImVec2& c, ImU32 col) {
+			    drawList->AddLine(ImVec2(c.x - 5.0f, c.y), ImVec2(c.x + 5.0f, c.y), col, 1.2f);
+		    },
+		    [] { Renderer::MinimizeWindow(); });
+
+		drawControlButton(
+		    "##TitleBarMaximize",
+		    1,
+		    false,
+		    [&](const ImVec2& c, ImU32 col) {
+			    if (Renderer::IsWindowMaximized())
+			    {
+				    drawList->AddRect(ImVec2(c.x - 3.0f, c.y - 5.0f), ImVec2(c.x + 5.0f, c.y + 3.0f), col, 0.0f, 0, 1.2f);
+				    drawList->AddRectFilled(ImVec2(c.x - 5.0f, c.y - 3.0f), ImVec2(c.x + 3.0f, c.y + 5.0f), IM_COL32(18, 19, 23, 255));
+				    drawList->AddRect(ImVec2(c.x - 5.0f, c.y - 3.0f), ImVec2(c.x + 3.0f, c.y + 5.0f), col, 0.0f, 0, 1.2f);
+			    }
+			    else
+			    {
+				    drawList->AddRect(ImVec2(c.x - 4.5f, c.y - 4.5f), ImVec2(c.x + 4.5f, c.y + 4.5f), col, 0.0f, 0, 1.2f);
+			    }
+		    },
+		    [] { Renderer::ToggleMaximizeWindow(); });
+
+		drawControlButton(
+		    "##TitleBarClose",
+		    2,
+		    true,
+		    [&](const ImVec2& c, ImU32 col) {
+			    drawList->AddLine(ImVec2(c.x - 4.5f, c.y - 4.5f), ImVec2(c.x + 4.5f, c.y + 4.5f), col, 1.3f);
+			    drawList->AddLine(ImVec2(c.x + 4.5f, c.y - 4.5f), ImVec2(c.x - 4.5f, c.y + 4.5f), col, 1.3f);
+		    },
+		    [] { Renderer::CloseWindow(); });
+
+		Renderer::SetTitleBarInfo(height, buttonsWidth, anyButtonHovered);
+
+		ImGui::SetCursorScreenPos(ImVec2(winPos.x, winPos.y + height));
+	}
+
+	void DrawCustomTitleBarWindow(float height)
+	{
+		const auto& displaySize = ImGui::GetIO().DisplaySize;
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(displaySize.x, height), ImGuiCond_Always);
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+		if (ImGui::Begin("##TopBarWindow", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings))
+		{
+			DrawCustomTitleBar(height);
+		}
+		ImGui::End();
+		ImGui::PopStyleVar(3);
+	}
+
 	void DefaultStyle()
 	{
 		ImGuiStyle& style = ImGui::GetStyle();
